@@ -13,7 +13,7 @@
   -webkit-app-region: drag;
 }
 .desktop-titlebar-drag { display: flex; min-width: 0; height: 100%; align-items: center; gap: 9px; padding: 0 12px; -webkit-app-region: drag; }
-.desktop-titlebar-drag img { width: 19px; height: 19px; object-fit: contain; }
+.desktop-titlebar-drag img { width: 25px; height: 25px; object-fit: contain; }
 .desktop-titlebar-drag > span { font-size: 12px; font-weight: 750; }
 .desktop-titlebar-navigation { display: flex; align-items: center; gap: 2px; margin-right: 5px; -webkit-app-region: no-drag; }
 .desktop-titlebar-navigation button { display: grid; width: 26px; height: 26px; place-items: center; border: 0; border-radius: 7px; background: transparent; color: #aaa4b5; font-size: 11px; cursor: pointer; }

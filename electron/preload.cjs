@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('gameonixDesktop', {
     get: () => ipcRenderer.invoke('auth-session:get'),
     set: (token) => ipcRenderer.invoke('auth-session:set', token),
     clear: () => ipcRenderer.invoke('auth-session:clear'),
+    signInWithWebsite: () => ipcRenderer.invoke('auth-session:website-login'),
   },
   windowControls: {
     minimize: () => ipcRenderer.invoke('window:minimize'),
@@ -39,7 +40,8 @@ contextBridge.exposeInMainWorld('gameonixDesktop', {
   },
   downloads: {
     list: () => ipcRenderer.invoke('downloads:list'),
-    start: (game) => ipcRenderer.invoke('downloads:start', game),
+    start: (game) => ipcRenderer.invoke('downloads:prepare', game),
+    begin: (id, fileIndices) => ipcRenderer.invoke('downloads:begin', { id, fileIndices }),
     pause: (id) => ipcRenderer.invoke('downloads:pause', id),
     resume: (id) => ipcRenderer.invoke('downloads:resume', id),
     remove: (id, deleteFiles = false) => ipcRenderer.invoke('downloads:remove', { id, deleteFiles }),

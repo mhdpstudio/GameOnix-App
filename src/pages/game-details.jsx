@@ -214,13 +214,13 @@ function GameDetails() {
                 });
                 if (!accepted) return;
             }
-            await window.gameonixDesktop.downloads.start({
+            const result = await window.gameonixDesktop.downloads.start({
                 slug: game.slug,
                 title: game.title,
                 torrentUrl: game.gameLink,
             });
             void recordGameActivity(game.slug, "download").catch(() => {});
-            navigate("/downloads");
+            if (result?.id) navigate("/downloads");
         } catch (reason) {
             void alert({ title: "Download could not start", message: reason?.message || "Try again from the game page." });
         } finally {

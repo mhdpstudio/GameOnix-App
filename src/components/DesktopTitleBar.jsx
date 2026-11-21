@@ -36,7 +36,7 @@ export default function DesktopTitleBar() {
         <button type="button" aria-label="Go back" title="Go back" onClick={() => desktop.windowControls.back()}><FontAwesomeIcon icon={faArrowLeft} /></button>
         <button type="button" aria-label="Go forward" title="Go forward" onClick={() => desktop.windowControls.forward()}><FontAwesomeIcon icon={faArrowRight} /></button>
       </div>
-      <img src="./logo.png" alt="" />
+      <img src="/gameonix-icon.png" alt="" />
       <span>GameOnix</span>
       {updateText && <span className={`desktop-update-indicator is-${update.status}`} title={update.error || "GameOnix update"}>
         {update.status === "downloading" && <i style={{ width: `${Math.max(0, Math.min(100, update.progress || 0))}%` }} />}

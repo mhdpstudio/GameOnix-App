@@ -1380,7 +1380,7 @@ function Topbar() {
                                             <FontAwesomeIcon icon={faGear} />
                                             <span>Profile settings</span>
                                         </Link>
-                                        {!window.gameonixDesktop && <button
+                                        <button
                                             type="button"
                                             className="topbar-profile-signout"
                                             role="menuitem"
@@ -1398,7 +1398,7 @@ function Topbar() {
                                                     ? "Signing out..."
                                                     : "Sign out"}
                                             </span>
-                                        </button>}
+                                        </button>
                                     </nav>
                                 )}
                                 {openAccountPanel === "profile" && !user && (

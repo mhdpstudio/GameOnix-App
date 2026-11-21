@@ -29,7 +29,7 @@ function formatDuration(seconds) {
 }
 
 function statusLabel(status) {
-  return ({ starting: "Connecting", downloading: "Downloading", paused: "Paused", completed: "Complete", error: "Needs attention" })[status] || "Waiting";
+  return ({ selecting: "Choose files", starting: "Connecting", downloading: "Downloading", paused: "Paused", completed: "Complete", error: "Needs attention" })[status] || "Waiting";
 }
 
 export default function Downloads() {
@@ -37,6 +37,7 @@ export default function Downloads() {
   const [folder, setFolder] = useState("");
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState("");
+  const [fileChoices, setFileChoices] = useState({});
   const desktop = window.gameonixDesktop;
   const { confirm } = useDialog();
 
@@ -97,14 +98,16 @@ export default function Downloads() {
     {!items.length ? <section className="downloads-empty"><span className="downloads-empty-icon"><FontAwesomeIcon icon={faArrowDown} /></span><h2>Your downloads will show here</h2><p>Open a game page and choose <strong>Download Game</strong> to start its torrent.</p><Link to="/games">Browse games</Link></section> : <section className="downloads-list" aria-label="Download list">{items.map((item) => {
       const percent = Math.min(100, Math.max(0, Number(item.progress) * 100));
       const isBusy = busyId === item.id;
+      const selectedFiles = fileChoices[item.id] ?? item.selectedFiles ?? [];
       return <article className={`download-card is-${item.status}`} key={item.id}>
         <div className="download-card-top"><span className={`download-status status-${item.status}`}><i />{statusLabel(item.status)}</span><strong>{percent.toFixed(1)}%</strong></div>
         <h2>{item.title}</h2>
+        {item.status === "selecting" && <section className="download-file-picker" aria-label={`Choose files for ${item.title}`}><strong>Choose files to download</strong>{item.files?.length ? item.files.map((file, index) => <label key={`${file.name}-${index}`}><input type="checkbox" checked={selectedFiles.includes(index)} onChange={(event) => setFileChoices((current) => { const next = new Set(current[item.id] ?? item.selectedFiles ?? []); event.target.checked ? next.add(index) : next.delete(index); return { ...current, [item.id]: [...next] }; })} /><span>{file.name}</span><small>{formatBytes(file.length)}</small></label>) : <p>Reading torrent file list…</p>}<button type="button" className="is-primary" disabled={isBusy || !item.files?.length || !selectedFiles.length} onClick={() => void runAction(item.id, () => desktop.downloads.begin(item.id, selectedFiles))}><FontAwesomeIcon icon={faDownload} /> Download selected files</button></section>}
         {item.error && <p className="download-card-error">{item.error}</p>}
         <div className="download-progress"><span style={{ width: `${percent}%` }} /></div>
         <div className="download-meta"><span>{formatBytes(item.downloaded)} of {item.total ? formatBytes(item.total) : "—"}</span><span><FontAwesomeIcon icon={faWifi} /> {item.peers} peers</span>{item.status === "downloading" && <span><FontAwesomeIcon icon={faArrowDown} /> {formatBytes(item.speed)}/s</span>}{item.status === "downloading" && <span><FontAwesomeIcon icon={faClock} /> {formatDuration(item.etaSeconds)}</span>}</div>
         <div className="download-card-actions">
-          {item.status === "downloading" || item.status === "starting" ? <button type="button" onClick={() => void runAction(item.id, () => desktop.downloads.pause(item.id))} disabled={isBusy}><FontAwesomeIcon icon={faPause} /> Pause</button> : ["paused", "error"].includes(item.status) && <button type="button" className="is-primary" onClick={() => void runAction(item.id, () => desktop.downloads.resume(item.id))} disabled={isBusy}><FontAwesomeIcon icon={faPlay} /> Resume</button>}
+          {item.status === "downloading" || item.status === "starting" ? <button type="button" onClick={() => void runAction(item.id, () => desktop.downloads.pause(item.id))} disabled={isBusy || item.status === "starting"}><FontAwesomeIcon icon={faPause} /> Pause</button> : ["paused", "error"].includes(item.status) && <button type="button" className="is-primary" onClick={() => void runAction(item.id, () => desktop.downloads.resume(item.id))} disabled={isBusy}><FontAwesomeIcon icon={faPlay} /> Resume</button>}
           {item.status === "completed" && <button type="button" className="is-primary" onClick={() => void desktop.downloads.openFolder(item.id)}><FontAwesomeIcon icon={faFolderOpen} /> Open folder</button>}
           {item.status === "completed" && <span className="download-complete-label"><FontAwesomeIcon icon={faCheck} /> Ready</span>}
           <button type="button" className="download-remove-button" onClick={() => void removeDownload(item)} disabled={isBusy}><FontAwesomeIcon icon={faTrash} /> Remove</button>

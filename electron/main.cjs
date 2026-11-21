@@ -3,6 +3,7 @@ const fs = require('node:fs/promises')
 const fsSync = require('node:fs')
 const path = require('node:path')
 const crypto = require('node:crypto')
+const http = require('node:http')
 const zlib = require('node:zlib')
 const { spawn } = require('node:child_process')
 const { Readable, Transform } = require('node:stream')
@@ -355,6 +356,8 @@ function publicDownload(item) {
     etaSeconds: Number.isFinite(item.etaSeconds) ? item.etaSeconds : null,
     peers: Number(item.peers) || 0,
     error: item.error || '',
+    files: Array.isArray(item.files) ? item.files.map((file, index) => ({ ...file, selected: (item.selectedFiles || []).includes(index) })) : [],
+    selectedFiles: Array.isArray(item.selectedFiles) ? item.selectedFiles : [],
     updatedAt: item.updatedAt || null,
   }
 }
@@ -418,9 +421,6 @@ function pauseTorrentRequests(torrent) {
 function resumeTorrentRequests(torrent) {
   if (torrent.destroyed) return
   torrent.resume()
-  if (torrent.ready && torrent.pieces?.length && !torrent.done) {
-    torrent.select(0, torrent.pieces.length - 1)
-  }
 }
 
 function getSmoothedSpeed(torrent, item) {
@@ -444,16 +444,29 @@ function startStatsTimer() {
       const item = downloads.get(id)
       if (!item || !torrent || torrent.destroyed) continue
       const speed = torrent.paused ? 0 : getSmoothedSpeed(torrent, item)
-      const total = Number(torrent.length) || Number(item.total) || 0
-      const downloaded = Number(torrent.downloaded) || Number(item.downloaded) || 0
+      const selected = Array.isArray(item.selectedFiles) ? item.selectedFiles : []
+      const files = selected.map((index) => torrent.files?.[index]).filter(Boolean)
+      const total = files.length ? files.reduce((sum, file) => sum + (Number(file.length) || 0), 0) : Number(torrent.length) || Number(item.total) || 0
+      const downloaded = files.length ? files.reduce((sum, file) => sum + (Number(file.downloaded) || 0), 0) : Number(torrent.downloaded) || Number(item.downloaded) || 0
       const remaining = Math.max(0, total - downloaded)
       const rawEta = speed > 1024 ? remaining / speed : null
       item.speed = speed
-      item.progress = Number(torrent.progress) || 0
+      item.progress = total ? Math.min(1, downloaded / total) : 0
       item.downloaded = downloaded
       item.total = total
       item.peers = Number(torrent.numPeers) || 0
-      item.status = torrent.paused ? 'paused' : torrent.done ? 'completed' : 'downloading'
+      const selectedComplete = files.length > 0 && files.every((file) => file.done)
+      if (selectedComplete) {
+        item.status = 'completed'
+        item.speed = 0
+        item.etaSeconds = 0
+        if (!item.completionNotified) {
+          item.completionNotified = true
+          pauseTorrentRequests(torrent)
+          showWindowsNotification('Download Has been completed', `${item.title} has finished downloading.`, '/downloads')
+          syncTray()
+        }
+      } else item.status = item.status === 'selecting' ? 'selecting' : torrent.paused ? 'paused' : torrent.done ? 'completed' : 'downloading'
       item.etaSeconds = rawEta === null ? null : Number.isFinite(item.etaSeconds)
         ? item.etaSeconds * 0.72 + rawEta * 0.28
         : rawEta
@@ -471,6 +484,7 @@ async function startTorrent(item, { paused = false } = {}) {
   if (!String(item.torrentUrl || '').startsWith(TRUSTED_TORRENT_PREFIX)) {
     throw new Error('This torrent link is not from the GameOnix data server.')
   }
+  const pendingFileSelection = paused && item.status === 'selecting'
 
   await fs.mkdir(item.targetDirectory, { recursive: true })
   item.status = 'starting'
@@ -487,15 +501,22 @@ async function startTorrent(item, { paused = false } = {}) {
     strategy: 'rarest',
     maxWebConns: 8,
     destroyStoreOnDestroy: false,
+    deselect: true,
   })
   activeTorrents.set(item.id, torrent)
   torrent.on('metadata', () => {
     item.total = Number(torrent.length) || item.total
     item.title = item.title || torrent.name || item.slug
+    item.files = (torrent.files || []).map((file) => ({ name: file.name, length: Number(file.length) || 0 }))
+    if (!Array.isArray(item.selectedFiles)) item.selectedFiles = pendingFileSelection ? [] : torrent.files.map((_, index) => index)
   })
   torrent.on('ready', () => {
-    if (torrent.paused) pauseTorrentRequests(torrent)
-    item.status = torrent.paused ? 'paused' : 'downloading'
+    if (torrent.paused || item.status === 'selecting') pauseTorrentRequests(torrent)
+    else {
+      torrent.deselect(0, Math.max(0, torrent.pieces.length - 1))
+      for (const index of item.selectedFiles || []) torrent.files[index]?.select()
+    }
+    item.status = pendingFileSelection ? 'selecting' : torrent.paused ? 'paused' : 'downloading'
     item.total = Number(torrent.length) || item.total
     item.title = item.title || torrent.name || item.slug
     item.infoHash = torrent.infoHash
@@ -509,7 +530,8 @@ async function startTorrent(item, { paused = false } = {}) {
     item.speed = 0
     item.etaSeconds = 0
     void saveAndPublish()
-    showWindowsNotification('Download Has been completed', `${item.title} has finished downloading.`, '/downloads')
+    if (!item.completionNotified) showWindowsNotification('Download Has been completed', `${item.title} has finished downloading.`, '/downloads')
+    item.completionNotified = true
     syncTray()
   })
   torrent.on('error', (error) => {
@@ -630,8 +652,9 @@ function applyStartupSetting() {
 
 async function restoreDownloads() {
   for (const item of downloads.values()) {
-    if (item.status === 'downloading' || item.status === 'starting') {
-      void startTorrent(item).catch((error) => {
+    if (['downloading', 'starting', 'selecting'].includes(item.status)) {
+      const wasSelecting = item.status === 'selecting'
+      void startTorrent(item, { paused: wasSelecting }).catch((error) => {
         item.status = 'error'
         item.error = error.message
         void saveAndPublish()
@@ -707,6 +730,50 @@ function registerDownloadIpc() {
       return ''
     }
   })
+  ipcMain.handle('auth-session:website-login', async (event) => {
+    requireTrustedFrame(event)
+    if (!safeStorage.isEncryptionAvailable()) throw new Error('Secure session storage is unavailable on this device.')
+    const state = crypto.randomBytes(32).toString('hex')
+    const allowedOrigins = new Set(['https://www.gameonix.shop', 'https://gameonix.shop'])
+    const server = http.createServer(async (request, response) => {
+      const origin = String(request.headers.origin || '')
+      if (!allowedOrigins.has(origin)) { response.writeHead(403).end(); return }
+      response.setHeader('Access-Control-Allow-Origin', origin)
+      response.setHeader('Vary', 'Origin')
+      response.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
+      response.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+      response.setHeader('Access-Control-Allow-Private-Network', 'true')
+      if (request.method === 'OPTIONS') { response.writeHead(204).end(); return }
+      const url = new URL(request.url || '/', 'http://127.0.0.1')
+      if (request.method !== 'POST' || url.pathname !== '/session' || url.searchParams.get('state') !== state) { response.writeHead(404).end(); return }
+      try {
+        let body = ''
+        for await (const chunk of request) { body += chunk; if (body.length > 12000) throw new Error('Invalid session response.') }
+        const token = JSON.parse(body).token
+        if (typeof token !== 'string' || token.length > 8192) throw new Error('The website did not provide a valid session.')
+        const check = await net.fetch('https://gameonix-backend.vercel.app/api/auth/me', { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } })
+        if (!check.ok) throw new Error('The website session has expired. Sign in on the website and try again.')
+        const data = await check.json()
+        await fs.writeFile(authSessionPath, safeStorage.encryptString(token))
+        response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ ok: true }))
+        server.close()
+        resolveLogin({ username: data.user?.username || '' })
+      } catch (error) {
+        response.writeHead(400, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: error.message || 'Could not import the website session.' }))
+      }
+    })
+    let resolveLogin
+    const result = new Promise((resolve, reject) => { resolveLogin = resolve; server.once('error', reject) })
+    server.listen(0, '127.0.0.1', async () => {
+      const port = server.address().port
+      try { await shell.openExternal(`https://www.gameonix.shop/desktop-login?port=${port}&state=${state}`) }
+      catch (error) { server.close(); resolveLogin({ error: error.message }) }
+    })
+    const timeout = setTimeout(() => { server.close(); resolveLogin({ error: 'Website sign-in timed out. Try again.' }) }, 3 * 60 * 1000)
+    const outcome = await result.finally(() => clearTimeout(timeout))
+    if (outcome.error) throw new Error(outcome.error)
+    return outcome
+  })
   ipcMain.handle('auth-session:set', async (event, token) => {
     requireTrustedFrame(event)
     if (typeof token !== 'string' || !token || token.length > 8192 || !safeStorage.isEncryptionAvailable()) return false
@@ -769,7 +836,7 @@ function registerDownloadIpc() {
     await persistDownloads()
     return downloadDirectory
   })
-  ipcMain.handle('downloads:start', async (event, game) => {
+  ipcMain.handle('downloads:prepare', async (event, game) => {
     requireTrustedFrame(event)
     const slug = safeSlug(game?.slug)
     const title = String(game?.title || '').trim().slice(0, 160) || slug
@@ -779,7 +846,7 @@ function registerDownloadIpc() {
     }
     const existing = downloads.get(slug)
     if (existing) {
-      if (existing.status === 'paused' || existing.status === 'error') await startTorrent(existing)
+      if (existing.status === 'paused' || existing.status === 'error' || existing.status === 'selecting') await startTorrent(existing, { paused: true })
       return { id: slug, downloads: getSnapshot() }
     }
     const item = {
@@ -787,7 +854,7 @@ function registerDownloadIpc() {
       slug,
       title,
       torrentUrl,
-      status: 'starting',
+      status: 'selecting',
       progress: 0,
       downloaded: 0,
       total: 0,
@@ -798,11 +865,13 @@ function registerDownloadIpc() {
       downloadDirectory,
       targetDirectory: path.join(downloadDirectory, slug),
       updatedAt: new Date().toISOString(),
+      selectedFiles: [],
+      files: [],
     }
     downloads.set(slug, item)
     syncTray()
     try {
-      await startTorrent(item)
+      await startTorrent(item, { paused: true })
       syncTray()
       return { id: slug, downloads: getSnapshot() }
     } catch (error) {
@@ -812,15 +881,37 @@ function registerDownloadIpc() {
       throw error
     }
   })
+  ipcMain.handle('downloads:begin', async (event, { id, fileIndices } = {}) => {
+    requireTrustedFrame(event)
+    const item = downloads.get(safeSlug(id))
+    if (!item) throw new Error('Download not found.')
+    const torrent = activeTorrents.get(item.id)
+    if (!torrent || torrent.destroyed || !torrent.ready) throw new Error('Torrent file list is not ready yet.')
+    const selected = [...new Set((Array.isArray(fileIndices) ? fileIndices : []).map(Number).filter((index) => Number.isInteger(index) && index >= 0 && index < torrent.files.length))]
+    if (!selected.length) throw new Error('Choose at least one file to download.')
+    item.selectedFiles = selected
+    item.completionNotified = false
+    item.status = 'downloading'
+    item.error = ''
+    item.total = selected.reduce((sum, index) => sum + (Number(torrent.files[index].length) || 0), 0)
+    item.downloaded = selected.reduce((sum, index) => sum + (Number(torrent.files[index].downloaded) || 0), 0)
+    torrent.deselect(0, Math.max(0, torrent.pieces.length - 1))
+    for (const index of selected) torrent.files[index].select()
+    torrent.resume()
+    await saveAndPublish()
+    syncTray()
+    return getSnapshot()
+  })
   ipcMain.handle('downloads:pause', async (event, id) => {
     requireTrustedFrame(event)
     const item = downloads.get(safeSlug(id))
     if (!item) throw new Error('Download not found.')
     const torrent = activeTorrents.get(item.id)
     if (torrent && !torrent.destroyed) {
-      item.downloaded = Number(torrent.downloaded) || item.downloaded
-      item.total = Number(torrent.length) || item.total
-      item.progress = Number(torrent.progress) || item.progress
+      const selectedFiles = (item.selectedFiles || []).map((index) => torrent.files?.[index]).filter(Boolean)
+      item.total = selectedFiles.length ? selectedFiles.reduce((sum, file) => sum + (Number(file.length) || 0), 0) : Number(torrent.length) || item.total
+      item.downloaded = selectedFiles.length ? selectedFiles.reduce((sum, file) => sum + (Number(file.downloaded) || 0), 0) : Number(torrent.downloaded) || item.downloaded
+      item.progress = item.total ? Math.min(1, item.downloaded / item.total) : 0
       // Keep peer connections and partial-piece buffers. Cancel outstanding
       // requests so no more data is received until Resume reselects the files.
       pauseTorrentRequests(torrent)
@@ -838,6 +929,8 @@ function registerDownloadIpc() {
     if (!item) throw new Error('Download not found.')
     const torrent = activeTorrents.get(item.id)
     if (torrent && !torrent.destroyed) {
+      torrent.deselect(0, Math.max(0, torrent.pieces.length - 1))
+      for (const index of item.selectedFiles || []) torrent.files[index]?.select()
       resumeTorrentRequests(torrent)
       item.status = 'downloading'
       item.error = ''

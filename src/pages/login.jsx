@@ -29,6 +29,8 @@ function Login() {
   const navigate = useNavigate();
   const location = useLocation();
   const { login } = useAuth();
+  const { refreshUser } = useAuth();
+  const [websiteLoginBusy, setWebsiteLoginBusy] = useState(false);
   const { getSuggestion, getLiveSuggestion, keepTypedEmail } =
     useEmailTypoGuard();
   const redirectTo =
@@ -83,6 +85,19 @@ function Login() {
   const isVerify = mode === "verify";
   const isForgot = mode === "forgot";
   const isReset = mode === "reset";
+
+  async function signInWithWebsite() {
+    setWebsiteLoginBusy(true);
+    setMessage("");
+    try {
+      await window.gameonixDesktop.authSession.signInWithWebsite();
+      await refreshUser();
+      navigate(redirectTo, { replace: true });
+    } catch (error) {
+      setMessage(error?.message || "Could not sign in with your website session.");
+      setMessageType("error");
+    } finally { setWebsiteLoginBusy(false); }
+  }
 
   useEffect(() => {
     if (passwordResetToken) {
@@ -918,6 +933,15 @@ function Login() {
                     className="auth-submit-arrow"
                   />
                 </button>
+
+                {isLogin && window.gameonixDesktop && <button
+                  type="button"
+                  className="auth-text-button desktop-website-signin"
+                  onClick={() => void signInWithWebsite()}
+                  disabled={websiteLoginBusy || isSubmitting}
+                >
+                  {websiteLoginBusy ? "Waiting for GameOnix website…" : "Sign in with my website account"}
+                </button>}
               </form>
             )}
 
