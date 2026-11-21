@@ -34,6 +34,8 @@
 .download-card-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; margin-top: 18px; }
 .download-card-actions .is-primary, .downloads-empty a { border-color: #7955df; background: #6844ce; color: white; }
 .download-card-actions .download-remove-button { margin-left: auto; color: #b6aeba; }
+.download-card-actions .download-delete-files-button { margin-left: 0; border-color: #603b43; color: #f0adb4; }
+.download-card-actions .download-delete-files-button:hover { border-color: #a34d5b; background: #2a171d; }
 .download-card-actions button:disabled { opacity: .5; cursor: wait; }
 .download-complete-label { display: inline-flex; align-items: center; gap: 6px; color: #5bdbaa; font-size: 13px; }
 .downloads-empty { display: flex; min-height: 300px; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 32px; border: 1px dashed #39334a; border-radius: 16px; text-align: center; }

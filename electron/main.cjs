@@ -508,7 +508,7 @@ function startStatsTimer() {
           showWindowsNotification('Download Has been completed', `${item.title} has finished downloading.`, '/downloads')
           syncTray()
         }
-      } else item.status = item.status === 'selecting' ? 'selecting' : torrent.paused ? 'paused' : torrent.done ? 'completed' : 'downloading'
+      } else item.status = item.status === 'selecting' ? 'selecting' : torrent.paused ? 'paused' : Number(torrent.numPeers) === 0 ? 'starting' : torrent.done ? 'completed' : 'downloading'
       item.etaSeconds = rawEta === null ? null : Number.isFinite(item.etaSeconds)
         ? item.etaSeconds * 0.72 + rawEta * 0.28
         : rawEta
@@ -546,6 +546,15 @@ async function startTorrent(item, { paused = false } = {}) {
     deselect: true,
   })
   activeTorrents.set(item.id, torrent)
+  let resolveTorrentReady
+  let rejectTorrentReady
+  torrent.gameOnixReady = new Promise((resolve, reject) => {
+    resolveTorrentReady = resolve
+    rejectTorrentReady = reject
+  })
+  // A torrent can be prepared before the user confirms files; don't let that
+  // intentionally pending promise surface as an unhandled rejection.
+  torrent.gameOnixReady.catch(() => {})
   torrent.on('metadata', () => {
     item.total = Number(torrent.length) || item.total
     item.title = item.title || torrent.name || item.slug
@@ -562,6 +571,7 @@ async function startTorrent(item, { paused = false } = {}) {
     item.total = Number(torrent.length) || item.total
     item.title = item.title || torrent.name || item.slug
     item.infoHash = torrent.infoHash
+    resolveTorrentReady()
     void saveAndPublish()
   })
   torrent.on('done', () => {
@@ -577,6 +587,7 @@ async function startTorrent(item, { paused = false } = {}) {
     syncTray()
   })
   torrent.on('error', (error) => {
+    rejectTorrentReady(error)
     item.status = 'error'
     item.error = error?.message || 'The torrent could not be downloaded.'
     item.speed = 0
@@ -906,18 +917,34 @@ function registerDownloadIpc() {
     const item = downloads.get(safeSlug(id))
     if (!item) throw new Error('Download not found.')
     const torrent = activeTorrents.get(item.id)
-    if (!torrent || torrent.destroyed || !torrent.ready) throw new Error('Torrent file list is not ready yet.')
+    if (!torrent || torrent.destroyed) throw new Error('Torrent is not available. Remove it and start again.')
+    if (!torrent.ready) {
+      let timeoutId
+      try {
+        await Promise.race([
+          torrent.gameOnixReady || new Promise((resolve, reject) => {
+            torrent.once('ready', resolve)
+            torrent.once('error', reject)
+          }),
+          new Promise((_, reject) => { timeoutId = setTimeout(() => reject(new Error('The torrent metadata is taking too long. Try again in a moment.')), 90000) }),
+        ])
+      } finally {
+        clearTimeout(timeoutId)
+      }
+    }
+    if (torrent.destroyed || !torrent.ready) throw new Error('Torrent stopped before its file list was ready. Try again.')
     const selected = [...new Set((Array.isArray(fileIndices) ? fileIndices : []).map(Number).filter((index) => Number.isInteger(index) && index >= 0 && index < torrent.files.length))]
     if (!selected.length) throw new Error('Choose at least one file to download.')
     item.selectedFiles = selected
     item.completionNotified = false
-    item.status = 'downloading'
+    item.status = 'starting'
     item.error = ''
     item.total = selected.reduce((sum, index) => sum + (Number(torrent.files[index].length) || 0), 0)
     item.downloaded = selected.reduce((sum, index) => sum + (Number(torrent.files[index].downloaded) || 0), 0)
     torrent.deselect(0, Math.max(0, torrent.pieces.length - 1))
     for (const index of selected) torrent.files[index].select()
     torrent.resume()
+    item.status = Number(torrent.numPeers) === 0 ? 'starting' : 'downloading'
     await saveAndPublish()
     syncTray()
     return getSnapshot()

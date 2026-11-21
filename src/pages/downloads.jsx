@@ -80,7 +80,7 @@ export default function Downloads() {
     const accepted = await confirm({
       title: deleteFiles ? "Delete downloaded files?" : "Remove this download?",
       message: deleteFiles
-        ? `Delete ${item.title} and its downloaded files from your device? This cannot be undone.`
+        ? `Stop ${item.title} if it is still downloading, then permanently delete its downloaded files from your device? This cannot be undone.`
         : `Remove ${item.title} from this list? Its downloaded files will be kept.`,
       confirmLabel: deleteFiles ? "Delete files" : "Remove download",
       danger: deleteFiles,
@@ -107,11 +107,11 @@ export default function Downloads() {
         <div className="download-progress"><span style={{ width: `${percent}%` }} /></div>
         <div className="download-meta"><span>{formatBytes(item.downloaded)} of {item.total ? formatBytes(item.total) : "—"}</span><span><FontAwesomeIcon icon={faWifi} /> {item.peers} peers</span>{item.status === "downloading" && <span><FontAwesomeIcon icon={faArrowDown} /> {formatBytes(item.speed)}/s</span>}{item.status === "downloading" && <span><FontAwesomeIcon icon={faClock} /> {formatDuration(item.etaSeconds)}</span>}</div>
         <div className="download-card-actions">
-          {item.status === "downloading" || item.status === "starting" ? <button type="button" onClick={() => void runAction(item.id, () => desktop.downloads.pause(item.id))} disabled={isBusy || item.status === "starting"}><FontAwesomeIcon icon={faPause} /> Pause</button> : ["paused", "error"].includes(item.status) && <button type="button" className="is-primary" onClick={() => void runAction(item.id, () => desktop.downloads.resume(item.id))} disabled={isBusy}><FontAwesomeIcon icon={faPlay} /> Resume</button>}
+          {item.status === "downloading" || item.status === "starting" ? <button type="button" onClick={() => void runAction(item.id, () => desktop.downloads.pause(item.id))} disabled={isBusy}><FontAwesomeIcon icon={faPause} /> Pause</button> : ["paused", "error"].includes(item.status) && <button type="button" className="is-primary" onClick={() => void runAction(item.id, () => desktop.downloads.resume(item.id))} disabled={isBusy}><FontAwesomeIcon icon={faPlay} /> Resume</button>}
           {item.status === "completed" && <button type="button" className="is-primary" onClick={() => void desktop.downloads.openFolder(item.id)}><FontAwesomeIcon icon={faFolderOpen} /> Open folder</button>}
           {item.status === "completed" && <span className="download-complete-label"><FontAwesomeIcon icon={faCheck} /> Ready</span>}
           <button type="button" className="download-remove-button" onClick={() => void removeDownload(item)} disabled={isBusy}><FontAwesomeIcon icon={faTrash} /> Remove</button>
-          {item.status === "completed" && <button type="button" className="download-remove-button" onClick={() => void removeDownload(item, true)} disabled={isBusy}><FontAwesomeIcon icon={faTrash} /> Delete files</button>}
+          <button type="button" className="download-remove-button download-delete-files-button" onClick={() => void removeDownload(item, true)} disabled={isBusy}><FontAwesomeIcon icon={faTrash} /> Delete files also</button>
         </div>
       </article>;
     })}</section>}

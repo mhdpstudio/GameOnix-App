@@ -19,6 +19,8 @@ import {
     faHdd,
     faBuilding,
     faXmark,
+    faTrash,
+    faFolderOpen,
 } from "@fortawesome/free-solid-svg-icons";
 import {
     faWindows,
@@ -47,6 +49,16 @@ const BANNERS_BASE_URL =
     "https://raw.githubusercontent.com/mhdpstudio/GameOnix-Data-Content/main/images/games/banners/";
 const GAME_REPORT_API_URL =
     "https://gameonixfav.vercel.app/api/game-report";
+
+function formatDownloadBytes(bytes) {
+    const value = Number(bytes) || 0;
+    if (value < 1024) return `${value} B`;
+    const units = ["KB", "MB", "GB", "TB"];
+    let size = value / 1024;
+    let index = 0;
+    while (size >= 1024 && index < units.length - 1) { size /= 1024; index += 1; }
+    return `${size.toFixed(size >= 100 ? 0 : size >= 10 ? 1 : 2)} ${units[index]}`;
+}
 
 function RequirementsPanel({ game }) {
     const requirements = game?.requirements && typeof game.requirements === "object"
@@ -194,6 +206,14 @@ function GameDetails() {
     const [favoriteBusy, setFavoriteBusy] = useState(false);
     const [favoriteError, setFavoriteError] = useState("");
     const [downloadStarting, setDownloadStarting] = useState(false);
+    const [downloadDialogOpen, setDownloadDialogOpen] = useState(false);
+    const [downloadDialogId, setDownloadDialogId] = useState("");
+    const [downloadDialogInfo, setDownloadDialogInfo] = useState(null);
+    const [downloadDialogFiles, setDownloadDialogFiles] = useState(null);
+    const [downloadDialogError, setDownloadDialogError] = useState("");
+    const [downloadDialogBusy, setDownloadDialogBusy] = useState(false);
+    const [downloadDialogIsNew, setDownloadDialogIsNew] = useState(false);
+    const [downloadTargetDirectory, setDownloadTargetDirectory] = useState("");
     const [showFavoriteMessage, setShowFavoriteMessage] = useState(false);
     const [follows, setFollows] = useState([]);
     const [followBusy, setFollowBusy] = useState(false);
@@ -205,28 +225,120 @@ function GameDetails() {
         if (!window.gameonixDesktop || !game) return;
         setDownloadStarting(true);
         try {
-            const preferences = await window.gameonixDesktop.settings.get();
-            if (preferences.askBeforeDownload) {
-                const accepted = await confirm({
-                    title: "Start this download?",
-                    message: `${game.title} will be downloaded to:\n${preferences.downloadDirectory}`,
-                    confirmLabel: "Start download",
-                });
-                if (!accepted) return;
-            }
+            const settings = await window.gameonixDesktop.settings.get();
+            setDownloadTargetDirectory(settings.downloadDirectory || "");
+            const currentDownloads = await window.gameonixDesktop.downloads.list();
+            const existing = currentDownloads.find((item) => item.id === game.slug);
+            setDownloadDialogIsNew(!existing);
+            setDownloadDialogId(game.slug);
+            setDownloadDialogInfo(existing || null);
+            setDownloadDialogFiles(null);
+            setDownloadDialogError("");
             const result = await window.gameonixDesktop.downloads.start({
                 slug: game.slug,
                 title: game.title,
                 torrentUrl: game.gameLink,
             });
-            void recordGameActivity(game.slug, "download").catch(() => {});
-            if (result?.id) navigate("/downloads");
+            setDownloadDialogId(result?.id || game.slug);
+            setDownloadDialogOpen(true);
         } catch (reason) {
             void alert({ title: "Download could not start", message: reason?.message || "Try again from the game page." });
         } finally {
             setDownloadStarting(false);
         }
     }
+
+    useEffect(() => {
+        const desktop = window.gameonixDesktop;
+        if (!desktop || !downloadDialogOpen || !downloadDialogId) return undefined;
+        let active = true;
+        const updateDialog = (items) => {
+            if (!active) return;
+            const item = items.find((entry) => entry.id === downloadDialogId);
+            setDownloadDialogInfo(item || null);
+            if (item?.files?.length) {
+                setDownloadDialogFiles((selected) => selected === null
+                    ? (item.selectedFiles?.length ? item.selectedFiles : item.files.map((_, index) => index))
+                    : selected);
+            }
+        };
+        const unsubscribe = desktop.downloads.onUpdate(updateDialog);
+        desktop.downloads.list().then(updateDialog).catch((reason) => {
+            if (active) setDownloadDialogError(reason.message || "Could not read the torrent file list.");
+        });
+        return () => { active = false; unsubscribe(); };
+    }, [downloadDialogOpen, downloadDialogId]);
+
+    async function closeDownloadDialog() {
+        if (downloadDialogBusy) return;
+        setDownloadDialogOpen(false);
+        if (downloadDialogIsNew && (!downloadDialogInfo || ["starting", "selecting"].includes(downloadDialogInfo.status))) {
+            await window.gameonixDesktop?.downloads.remove(downloadDialogId, false).catch(() => {});
+        }
+        setDownloadDialogIsNew(false);
+    }
+
+    async function beginSelectedDownload() {
+        if (!downloadDialogId || !downloadDialogFiles?.length) return;
+        setDownloadDialogBusy(true);
+        setDownloadDialogError("");
+        try {
+            await window.gameonixDesktop.downloads.begin(downloadDialogId, downloadDialogFiles);
+            void recordGameActivity(game.slug, "download").catch(() => {});
+            setDownloadDialogOpen(false);
+            setDownloadDialogIsNew(false);
+            navigate("/downloads");
+        } catch (reason) {
+            setDownloadDialogError(reason.message || "Could not start this download.");
+        } finally {
+            setDownloadDialogBusy(false);
+        }
+    }
+
+    async function removeGameFromDevice() {
+        const accepted = await confirm({
+            title: "Remove this game from this device?",
+            message: `This removes ${game.title} and its downloaded files from your device. This cannot be undone.`,
+            confirmLabel: "Remove game and files",
+            danger: true,
+        });
+        if (!accepted) return;
+        setDownloadDialogBusy(true);
+        try {
+            await window.gameonixDesktop.downloads.remove(downloadDialogId, true);
+            setDownloadDialogOpen(false);
+            setDownloadDialogIsNew(false);
+        } catch (reason) {
+            setDownloadDialogError(reason.message || "Could not remove the game files.");
+        } finally {
+            setDownloadDialogBusy(false);
+        }
+    }
+
+    async function resumeExistingDownload() {
+        if (!downloadDialogId) return;
+        setDownloadDialogBusy(true);
+        setDownloadDialogError("");
+        try {
+            await window.gameonixDesktop.downloads.resume(downloadDialogId);
+            setDownloadDialogOpen(false);
+            setDownloadDialogIsNew(false);
+            navigate("/downloads");
+        } catch (reason) {
+            setDownloadDialogError(reason.message || "Could not resume this download.");
+        } finally {
+            setDownloadDialogBusy(false);
+        }
+    }
+
+    useEffect(() => {
+        if (!downloadDialogOpen || downloadDialogBusy) return undefined;
+        const onKeyDown = (event) => {
+            if (event.key === "Escape") void closeDownloadDialog();
+        };
+        window.addEventListener("keydown", onKeyDown);
+        return () => window.removeEventListener("keydown", onKeyDown);
+    }, [downloadDialogOpen, downloadDialogBusy, downloadDialogId, downloadDialogInfo]);
 
     const [selectedImage, setSelectedImage] = useState(0);
     const [failedImages, setFailedImages] = useState([]);
@@ -548,6 +660,11 @@ function GameDetails() {
 
     const isFavorite = favorites.includes(game.slug);
     const addons = getAddonList(game.addons);
+    const downloadFiles = downloadDialogInfo?.files || [];
+    const selectedDownloadFiles = downloadDialogFiles || [];
+    const selectedDownloadSize = downloadFiles.reduce((size, file, index) =>
+        selectedDownloadFiles.includes(index) ? size + (Number(file.length) || 0) : size, 0);
+    const existingDownloadStatus = downloadDialogInfo?.status || "starting";
 
     return (
         <>
@@ -977,6 +1094,71 @@ function GameDetails() {
                 </section>
             )}
         </main>
+        {downloadDialogOpen && createPortal(
+            <div className="game-download-overlay" onMouseDown={(event) => {
+                if (event.target === event.currentTarget) void closeDownloadDialog();
+            }}>
+                <section className="game-download-dialog" role="dialog" aria-modal="true" aria-labelledby="game-download-title">
+                    <header className="game-download-dialog-header">
+                        <span className="game-download-dialog-icon"><FontAwesomeIcon icon={faDownload} /></span>
+                        <div><span>GAMEONIX DOWNLOAD</span><h2 id="game-download-title">{game.title}</h2><p>Choose which files to save on this device.</p></div>
+                        <button type="button" className="game-download-close" onClick={() => void closeDownloadDialog()} disabled={downloadDialogBusy} aria-label="Close file selection"><FontAwesomeIcon icon={faXmark} /></button>
+                    </header>
+
+                    {downloadDialogError && <p className="game-download-error" role="alert">{downloadDialogError}</p>}
+
+                    {existingDownloadStatus === "completed" ? (
+                        <div className="game-download-existing">
+                            <FontAwesomeIcon icon={faCircleCheck} />
+                            <div><strong>This game is already on your device</strong><span>Your downloaded files are saved in the GameOnix download folder.</span></div>
+                        </div>
+                    ) : existingDownloadStatus === "downloading" ? (
+                        <div className="game-download-existing">
+                            <span className="game-download-live-dot" />
+                            <div><strong>This game is already downloading</strong><span>Open Downloads to see progress or pause it.</span></div>
+                        </div>
+                    ) : ["paused", "error"].includes(existingDownloadStatus) ? (
+                        <div className="game-download-existing">
+                            <span className="game-download-live-dot is-paused" />
+                            <div><strong>{existingDownloadStatus === "paused" ? "This download is paused" : "This download needs attention"}</strong><span>Resume it to continue with the files you previously selected.</span></div>
+                        </div>
+                    ) : downloadFiles.length ? (
+                        <>
+                            <div className="game-download-file-tools"><span>{downloadFiles.length} files in this torrent</span><div><button type="button" onClick={() => setDownloadDialogFiles(downloadFiles.map((_, index) => index))}>Select all</button><button type="button" onClick={() => setDownloadDialogFiles([])}>Clear</button></div></div>
+                            <div className="game-download-file-list" role="group" aria-label="Choose game files">
+                                {downloadFiles.map((file, index) => (
+                                    <label className="game-download-file-row" key={`${file.name}-${index}`}>
+                                        <input type="checkbox" checked={selectedDownloadFiles.includes(index)} onChange={(event) => setDownloadDialogFiles((current) => {
+                                            const next = new Set(current || downloadFiles.map((_, fileIndex) => fileIndex));
+                                            if (event.target.checked) next.add(index); else next.delete(index);
+                                            return [...next].sort((left, right) => left - right);
+                                        })} />
+                                        <span className="game-download-file-check" aria-hidden="true" />
+                                        <span className="game-download-file-name" title={file.name}>{file.name}</span>
+                                        <small>{formatDownloadBytes(file.length)}</small>
+                                    </label>
+                                ))}
+                            </div>
+                        </>
+                    ) : (
+                        <div className="game-download-loading"><span className="game-download-spinner" /><strong>Reading torrent contents…</strong><p>The file list will appear here as soon as it is ready.</p></div>
+                    )}
+
+                    <footer className="game-download-dialog-footer">
+                        <div className="game-download-selected-size"><span>{downloadFiles.length && ["selecting", "starting"].includes(existingDownloadStatus) ? `${selectedDownloadFiles.length} of ${downloadFiles.length} files selected` : "Download location"}</span><strong title={downloadTargetDirectory}>{downloadFiles.length && ["selecting", "starting"].includes(existingDownloadStatus) ? formatDownloadBytes(selectedDownloadSize) : (downloadTargetDirectory || "Chosen in Settings")}</strong></div>
+                        <div className="game-download-dialog-actions">
+                            {downloadDialogInfo?.status === "completed" && <button type="button" className="game-download-secondary" onClick={() => void window.gameonixDesktop.downloads.openFolder(downloadDialogId)} disabled={downloadDialogBusy}><FontAwesomeIcon icon={faFolderOpen} /> Open game folder</button>}
+                            {downloadDialogInfo && (downloadDialogInfo.status === "completed" || Number(downloadDialogInfo.downloaded) > 0) && <button type="button" className="game-download-remove" onClick={() => void removeGameFromDevice()} disabled={downloadDialogBusy}><FontAwesomeIcon icon={faTrash} /> Remove game and files from device</button>}
+                            {["paused", "error"].includes(downloadDialogInfo?.status) && <button type="button" className="game-download-start" onClick={() => void resumeExistingDownload()} disabled={downloadDialogBusy}>{downloadDialogBusy ? "Resuming…" : "Resume download"}</button>}
+                            {downloadDialogInfo?.status === "downloading" && <button type="button" className="game-download-start" onClick={() => { setDownloadDialogOpen(false); navigate("/downloads"); }}>Open Downloads</button>}
+                            {downloadDialogInfo?.status === "completed" && <button type="button" className="game-download-start" onClick={() => { setDownloadDialogOpen(false); navigate("/downloads"); }}>Go to Downloads</button>}
+                            {!["downloading", "paused", "error", "completed"].includes(downloadDialogInfo?.status) && <button type="button" className="game-download-start" onClick={() => void beginSelectedDownload()} disabled={downloadDialogBusy || !downloadFiles.length || !selectedDownloadFiles.length}>{downloadDialogBusy ? "Starting…" : `Start download${selectedDownloadSize ? ` · ${formatDownloadBytes(selectedDownloadSize)}` : ""}`}</button>}
+                        </div>
+                    </footer>
+                </section>
+            </div>,
+            document.body
+        )}
         {reportOpen &&
             createPortal(
                 <div
