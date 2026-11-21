@@ -65,7 +65,10 @@ export function AuthProvider({ children }) {
   const login = useCallback(
     (userData, sessionToken, rememberMe = true) => {
       if (sessionToken) {
-        storeSessionToken(sessionToken, rememberMe);
+        // Desktop windows are short-lived when hidden, minimized, or updated.
+        // Keep their auth token in persistent storage even if the web-only
+        // "Keep me signed in" option was unchecked.
+        storeSessionToken(sessionToken, Boolean(window.gameonixDesktop) || rememberMe);
       }
 
       setUser(userData || null);

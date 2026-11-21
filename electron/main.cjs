@@ -325,7 +325,7 @@ async function startTorrent(item, { paused = false } = {}) {
     item.title = item.title || torrent.name || item.slug
   })
   torrent.on('ready', () => {
-    item.status = paused ? 'paused' : 'downloading'
+    item.status = torrent.paused ? 'paused' : 'downloading'
     item.total = Number(torrent.length) || item.total
     item.title = item.title || torrent.name || item.slug
     item.infoHash = torrent.infoHash
@@ -599,9 +599,10 @@ function registerDownloadIpc() {
       item.downloaded = Number(torrent.downloaded) || item.downloaded
       item.total = Number(torrent.length) || item.total
       item.progress = Number(torrent.progress) || item.progress
-      await new Promise((resolve, reject) => torrent.destroy({ destroyStore: false }, (error) => error ? reject(error) : resolve()))
+      // Keep the torrent and its in-progress piece buffers alive. Destroying it
+      // here discards blocks that have not yet formed a complete verified piece.
+      torrent.pause()
     }
-    activeTorrents.delete(item.id)
     item.status = 'paused'
     item.speed = 0
     item.etaSeconds = null
@@ -612,7 +613,16 @@ function registerDownloadIpc() {
     requireTrustedFrame(event)
     const item = downloads.get(safeSlug(id))
     if (!item) throw new Error('Download not found.')
-    await startTorrent(item)
+    const torrent = activeTorrents.get(item.id)
+    if (torrent && !torrent.destroyed) {
+      torrent.resume()
+      item.status = 'downloading'
+      item.error = ''
+      item.updatedAt = new Date().toISOString()
+      await saveAndPublish()
+    } else {
+      await startTorrent(item)
+    }
     return getSnapshot()
   })
   ipcMain.handle('downloads:remove', async (event, { id, deleteFiles = false } = {}) => {
@@ -691,7 +701,7 @@ app.on('before-quit', (event) => {
     item.downloaded = Number(torrent.downloaded) || item.downloaded
     item.total = Number(torrent.length) || item.total
     item.progress = Number(torrent.progress) || item.progress
-    item.status = torrent.done ? 'completed' : 'downloading'
+    item.status = torrent.done ? 'completed' : torrent.paused ? 'paused' : 'downloading'
   }
   void persistDownloads().catch((error) => console.error('Could not save download state before closing:', error)).finally(() => {
     try {
