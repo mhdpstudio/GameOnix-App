@@ -3,7 +3,6 @@ const fs = require('node:fs/promises')
 const fsSync = require('node:fs')
 const path = require('node:path')
 const crypto = require('node:crypto')
-const http = require('node:http')
 const zlib = require('node:zlib')
 const { spawn } = require('node:child_process')
 const { Readable, Transform } = require('node:stream')
@@ -36,6 +35,7 @@ let isQuitting = false
 let shutdownInProgress = false
 let shutdownComplete = false
 let unreadNotificationCount = 0
+let pendingDesktopLogin = null
 let appSettings = {
   closeToTray: true,
   launchAtStartup: false,
@@ -44,6 +44,48 @@ let appSettings = {
 let updaterState = { status: 'idle', currentVersion: app.getVersion(), availableVersion: '', progress: 0, error: '' }
 
 if (process.platform === 'win32') app.setAppUserModelId(APP_USER_MODEL_ID)
+
+const singleInstanceLock = app.requestSingleInstanceLock()
+if (!singleInstanceLock) app.quit()
+
+function getDesktopLoginUrlFromArgs(args = []) {
+  return args.map((value) => String(value).replace(/^"|"$/g, '')).find((value) => value.startsWith('gameonix://auth-callback/')) ||
+    args.map((value) => String(value).replace(/^"|"$/g, '')).find((value) => value.startsWith('gameonix://auth-callback?')) || ''
+}
+
+async function completeDesktopLogin(deepLink) {
+  if (!pendingDesktopLogin || !deepLink) return
+  let url
+  try { url = new URL(deepLink) } catch { return }
+  const pending = pendingDesktopLogin
+  if (url.protocol !== 'gameonix:' || url.hostname !== 'auth-callback' || url.searchParams.get('state') !== pending.state) return
+  try {
+    const iv = Buffer.from(url.searchParams.get('iv') || '', 'base64url')
+    const payload = Buffer.from(url.searchParams.get('payload') || '', 'base64url')
+    if (iv.length !== 12 || payload.length < 17 || payload.length > 12000) throw new Error('The website returned an invalid sign-in response.')
+    const decipher = crypto.createDecipheriv('aes-256-gcm', pending.key, iv)
+    decipher.setAuthTag(payload.subarray(payload.length - 16))
+    const token = Buffer.concat([decipher.update(payload.subarray(0, payload.length - 16)), decipher.final()]).toString('utf8')
+    if (!token || token.length > 8192) throw new Error('The website returned an invalid account session.')
+    const check = await net.fetch('https://gameonix-backend.vercel.app/api/auth/me', { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } })
+    if (!check.ok) throw new Error('The website session expired. Sign in on the website, then try again.')
+    const data = await check.json()
+    await fs.writeFile(authSessionPath, safeStorage.encryptString(token))
+    clearTimeout(pending.timer)
+    pendingDesktopLogin = null
+    pending.resolve({ username: data.user?.username || '' })
+  } catch (error) {
+    clearTimeout(pending.timer)
+    pendingDesktopLogin = null
+    pending.reject(new Error(error.message || 'Could not import the website session.'))
+  }
+}
+
+app.on('second-instance', (_event, commandLine) => {
+  const deepLink = getDesktopLoginUrlFromArgs(commandLine)
+  if (deepLink) void completeDesktopLogin(deepLink)
+  showMainWindow()
+})
 
 function publishUpdaterState() {
   for (const window of windows) {
@@ -733,46 +775,24 @@ function registerDownloadIpc() {
   ipcMain.handle('auth-session:website-login', async (event) => {
     requireTrustedFrame(event)
     if (!safeStorage.isEncryptionAvailable()) throw new Error('Secure session storage is unavailable on this device.')
+    if (pendingDesktopLogin) throw new Error('A website sign-in is already waiting to finish.')
     const state = crypto.randomBytes(32).toString('hex')
-    const allowedOrigins = new Set(['https://www.gameonix.shop', 'https://gameonix.shop'])
-    const server = http.createServer(async (request, response) => {
-      const origin = String(request.headers.origin || '')
-      if (!allowedOrigins.has(origin)) { response.writeHead(403).end(); return }
-      response.setHeader('Access-Control-Allow-Origin', origin)
-      response.setHeader('Vary', 'Origin')
-      response.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
-      response.setHeader('Access-Control-Allow-Headers', 'Content-Type')
-      response.setHeader('Access-Control-Allow-Private-Network', 'true')
-      if (request.method === 'OPTIONS') { response.writeHead(204).end(); return }
-      const url = new URL(request.url || '/', 'http://127.0.0.1')
-      if (request.method !== 'POST' || url.pathname !== '/session' || url.searchParams.get('state') !== state) { response.writeHead(404).end(); return }
-      try {
-        let body = ''
-        for await (const chunk of request) { body += chunk; if (body.length > 12000) throw new Error('Invalid session response.') }
-        const token = JSON.parse(body).token
-        if (typeof token !== 'string' || token.length > 8192) throw new Error('The website did not provide a valid session.')
-        const check = await net.fetch('https://gameonix-backend.vercel.app/api/auth/me', { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } })
-        if (!check.ok) throw new Error('The website session has expired. Sign in on the website and try again.')
-        const data = await check.json()
-        await fs.writeFile(authSessionPath, safeStorage.encryptString(token))
-        response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ ok: true }))
-        server.close()
-        resolveLogin({ username: data.user?.username || '' })
-      } catch (error) {
-        response.writeHead(400, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: error.message || 'Could not import the website session.' }))
-      }
+    const key = crypto.randomBytes(32)
+    const result = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        pendingDesktopLogin = null
+        reject(new Error('Website sign-in timed out. Try again.'))
+      }, 3 * 60 * 1000)
+      pendingDesktopLogin = { state, key, resolve, reject, timer }
     })
-    let resolveLogin
-    const result = new Promise((resolve, reject) => { resolveLogin = resolve; server.once('error', reject) })
-    server.listen(0, '127.0.0.1', async () => {
-      const port = server.address().port
-      try { await shell.openExternal(`https://www.gameonix.shop/desktop-login?port=${port}&state=${state}`) }
-      catch (error) { server.close(); resolveLogin({ error: error.message }) }
-    })
-    const timeout = setTimeout(() => { server.close(); resolveLogin({ error: 'Website sign-in timed out. Try again.' }) }, 3 * 60 * 1000)
-    const outcome = await result.finally(() => clearTimeout(timeout))
-    if (outcome.error) throw new Error(outcome.error)
-    return outcome
+    try {
+      await shell.openExternal(`https://www.gameonix.shop/desktop-login#handoff?state=${state}&key=${key.toString('base64url')}`)
+    } catch (error) {
+      clearTimeout(pendingDesktopLogin?.timer)
+      pendingDesktopLogin = null
+      throw error
+    }
+    return result
   })
   ipcMain.handle('auth-session:set', async (event, token) => {
     requireTrustedFrame(event)
@@ -995,6 +1015,14 @@ app.whenReady().then(async () => {
   applyStartupSetting()
   syncTray()
   registerDownloadIpc()
+  if (process.platform === 'win32') {
+    try {
+      if (app.isPackaged) app.setAsDefaultProtocolClient('gameonix')
+      else app.setAsDefaultProtocolClient('gameonix', process.execPath, [path.resolve(process.argv[1] || '.')])
+    } catch (error) {
+      console.error('Could not register the GameOnix website sign-in link:', error)
+    }
+  }
   if (app.isPackaged) await registerAppProtocol()
   const startHidden = appSettings.launchAtStartup && (process.argv.includes('--startup') || app.getLoginItemSettings?.().wasOpenedAtLogin)
   createWindow({ startHidden })
