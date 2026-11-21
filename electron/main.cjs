@@ -10,9 +10,10 @@ const { pipeline } = require('node:stream/promises')
 const { pathToFileURL } = require('node:url')
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }])
-if (process.platform === 'win32') app.setAppUserModelId('com.gameonix.desktop')
 
 const DEV_URL = 'http://localhost:5173'
+const APP_USER_MODEL_ID = 'com.gameonix.desktop'
+const TOAST_ACTIVATOR_CLSID = '{71C8C61D-96A7-40E2-AB8C-64CB4A4B6F13}'
 const TRUSTED_TORRENT_PREFIX = 'https://raw.githubusercontent.com/mhdpstudio/GameOnix-Data-Content/main/downloads/'
 const UPDATE_REPOSITORY = 'mhdpstudio/GameOnix-App'
 const UPDATE_ASSET_NAME = 'GameOnix-win-unpacked.zip'
@@ -39,6 +40,8 @@ let appSettings = {
   askBeforeDownload: true,
 }
 let updaterState = { status: 'idle', currentVersion: app.getVersion(), availableVersion: '', progress: 0, error: '' }
+
+if (process.platform === 'win32') app.setAppUserModelId(APP_USER_MODEL_ID)
 
 function publishUpdaterState() {
   for (const window of windows) {
@@ -172,6 +175,26 @@ function showWindowsNotification(title, body, route = '/notifications') {
   notification.on('click', () => openMainRoute(route === '/downloads' ? '/downloads' : '/notifications'))
   notification.show()
   return true
+}
+
+function registerWindowsNotificationShortcut() {
+  if (process.platform !== 'win32' || !app.isPackaged) return
+  const startMenuDirectory = path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'GameOnix')
+  fsSync.mkdirSync(startMenuDirectory, { recursive: true })
+  const shortcutPath = path.join(startMenuDirectory, 'GameOnix.lnk')
+  const details = {
+    target: process.execPath,
+    cwd: path.dirname(process.execPath),
+    description: 'GameOnix Desktop',
+    icon: getAppIconPath(),
+    iconIndex: 0,
+    appUserModelId: APP_USER_MODEL_ID,
+    toastActivatorClsid: TOAST_ACTIVATOR_CLSID,
+  }
+  const operation = fsSync.existsSync(shortcutPath) ? 'update' : 'create'
+  if (!shell.writeShortcutLink(shortcutPath, operation, details)) {
+    throw new Error('Windows could not register the GameOnix notification shortcut.')
+  }
 }
 
 function compareVersions(left, right) {
@@ -547,7 +570,9 @@ function showMainWindow() {
 
 function openMainRoute(route) {
   const window = showMainWindow()
-  window.webContents.executeJavaScript(`window.location.hash = ${JSON.stringify(`#${route}`)}`).catch(() => {})
+  const navigate = () => window.webContents.executeJavaScript(`window.location.hash = ${JSON.stringify(`#${route}`)}`).catch(() => {})
+  if (window.webContents.isLoading()) window.webContents.once('did-finish-load', navigate)
+  else navigate()
 }
 
 function syncTray() {
@@ -836,6 +861,15 @@ app.whenReady().then(async () => {
   if (app.isPackaged) await registerAppProtocol()
   const startHidden = appSettings.launchAtStartup && (process.argv.includes('--startup') || app.getLoginItemSettings?.().wasOpenedAtLogin)
   createWindow({ startHidden })
+  if (process.platform === 'win32' && app.isPackaged) {
+    try {
+      app.setToastActivatorCLSID(TOAST_ACTIVATOR_CLSID)
+      registerWindowsNotificationShortcut()
+      Notification.handleActivation(() => openMainRoute('/notifications'))
+    } catch (error) {
+      console.error('Could not register Windows notifications:', error)
+    }
+  }
   startUpdateMonitor()
   void restoreDownloads()
   app.on('activate', showMainWindow)
