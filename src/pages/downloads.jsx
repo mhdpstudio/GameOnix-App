@@ -39,7 +39,7 @@ export default function Downloads() {
   const [busyId, setBusyId] = useState("");
   const [fileChoices, setFileChoices] = useState({});
   const desktop = window.gameonixDesktop;
-  const { confirm } = useDialog();
+  const { confirmWithCheckbox } = useDialog();
 
   const refresh = useCallback(async () => {
     if (!desktop) return;
@@ -76,17 +76,17 @@ export default function Downloads() {
     }
   }
 
-  async function removeDownload(item, deleteFiles = false) {
-    const accepted = await confirm({
-      title: deleteFiles ? "Delete downloaded files?" : "Remove this download?",
-      message: deleteFiles
-        ? `Stop ${item.title} if it is still downloading, then permanently delete its downloaded files from your device? This cannot be undone.`
-        : `Remove ${item.title} from this list? Its downloaded files will be kept.`,
-      confirmLabel: deleteFiles ? "Delete files" : "Remove download",
-      danger: deleteFiles,
+  async function removeDownload(item) {
+    const answer = await confirmWithCheckbox({
+      title: "Remove this download?",
+      message: `Remove ${item.title} from your downloads? You can choose whether its files should also be deleted from this device.`,
+      checkboxLabel: "Also delete downloaded files from this device",
+      checkboxChecked: false,
+      confirmLabel: "Remove download",
+      danger: true,
     });
-    if (!accepted) return;
-    await runAction(item.id, () => desktop.downloads.remove(item.id, deleteFiles));
+    if (!answer?.confirmed) return;
+    await runAction(item.id, () => desktop.downloads.remove(item.id, answer.checked));
   }
 
   if (!desktop) return <main className="downloads-page"><section className="downloads-empty"><FontAwesomeIcon icon={faDownload} /><h1>Downloads are available in GameOnix Desktop</h1><p>Install the GameOnix app to download torrents and track their progress here.</p><Link to="/games">Browse games</Link></section></main>;
@@ -111,7 +111,6 @@ export default function Downloads() {
           {item.status === "completed" && <button type="button" className="is-primary" onClick={() => void desktop.downloads.openFolder(item.id)}><FontAwesomeIcon icon={faFolderOpen} /> Open folder</button>}
           {item.status === "completed" && <span className="download-complete-label"><FontAwesomeIcon icon={faCheck} /> Ready</span>}
           <button type="button" className="download-remove-button" onClick={() => void removeDownload(item)} disabled={isBusy}><FontAwesomeIcon icon={faTrash} /> Remove</button>
-          <button type="button" className="download-remove-button download-delete-files-button" onClick={() => void removeDownload(item, true)} disabled={isBusy}><FontAwesomeIcon icon={faTrash} /> Delete files also</button>
         </div>
       </article>;
     })}</section>}

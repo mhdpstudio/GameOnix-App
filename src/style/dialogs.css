@@ -6,6 +6,8 @@
 .app-dialog-icon.is-danger { border-color: #f062624d; background: #f04b4b1c; color: #ff8989; }
 .app-dialog h2 { margin: 20px 0 8px; font-size: 21px; letter-spacing: -.03em; }
 .app-dialog p { margin: 0; color: #aaa5b6; font-size: 14px; line-height: 1.7; white-space: pre-wrap; }
+.app-dialog-checkbox { display: flex; align-items: flex-start; gap: 10px; margin-top: 20px; padding: 12px 13px; border: 1px solid #34313f; border-radius: 10px; background: #111116; color: #ded9e8; font-size: 13px; line-height: 1.5; cursor: pointer; }
+.app-dialog-checkbox input { width: 16px; height: 16px; flex: 0 0 16px; margin: 1px 0 0; accent-color: #8b68ff; cursor: pointer; }
 .app-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 26px; }
 .app-dialog-actions button { min-height: 40px; padding: 0 17px; border: 1px solid #35313f; border-radius: 10px; background: #1d1b24; color: #e7e2ef; font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
 .app-dialog-actions button:hover { border-color: #8c69ee; }

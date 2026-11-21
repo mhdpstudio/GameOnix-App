@@ -526,7 +526,7 @@ async function startTorrent(item, { paused = false } = {}) {
   if (!String(item.torrentUrl || '').startsWith(TRUSTED_TORRENT_PREFIX)) {
     throw new Error('This torrent link is not from the GameOnix data server.')
   }
-  const pendingFileSelection = paused && item.status === 'selecting'
+  const pendingFileSelection = item.status === 'selecting'
 
   await fs.mkdir(item.targetDirectory, { recursive: true })
   item.status = 'starting'
@@ -539,7 +539,9 @@ async function startTorrent(item, { paused = false } = {}) {
 
   const torrent = client.add(item.torrentUrl, {
     path: item.targetDirectory,
-    paused,
+    // Keep peer discovery alive while the user chooses files. `deselect: true`
+    // prevents payload requests until the chosen files are selected.
+    paused: paused && !pendingFileSelection,
     strategy: 'rarest',
     maxWebConns: 8,
     destroyStoreOnDestroy: false,
@@ -562,7 +564,8 @@ async function startTorrent(item, { paused = false } = {}) {
     if (!Array.isArray(item.selectedFiles)) item.selectedFiles = pendingFileSelection ? [] : torrent.files.map((_, index) => index)
   })
   torrent.on('ready', () => {
-    if (torrent.paused || item.status === 'selecting') pauseTorrentRequests(torrent)
+    if (pendingFileSelection) torrent.deselect(0, Math.max(0, torrent.pieces.length - 1))
+    else if (torrent.paused) pauseTorrentRequests(torrent)
     else {
       torrent.deselect(0, Math.max(0, torrent.pieces.length - 1))
       for (const index of item.selectedFiles || []) torrent.files[index]?.select()
@@ -717,6 +720,7 @@ async function restoreDownloads() {
 }
 
 function createWindow({ startHidden = false } = {}) {
+  const appIcon = nativeImage.createFromPath(getAppIconPath())
   const window = new BrowserWindow({
     width: 1460,
     height: 920,
@@ -724,7 +728,7 @@ function createWindow({ startHidden = false } = {}) {
     minHeight: 650,
     backgroundColor: '#0b0d12',
     frame: false,
-    icon: getAppIconPath(),
+    icon: appIcon,
     autoHideMenuBar: true,
     show: false,
     webPreferences: {
@@ -735,6 +739,7 @@ function createWindow({ startHidden = false } = {}) {
       backgroundThrottling: false,
     },
   })
+  if (!appIcon.isEmpty()) window.setIcon(appIcon)
   windows.add(window)
   updateTaskbarNotificationOverlay()
   const publishWindowState = () => {
@@ -877,7 +882,7 @@ function registerDownloadIpc() {
     }
     const existing = downloads.get(slug)
     if (existing) {
-      if (existing.status === 'paused' || existing.status === 'error' || existing.status === 'selecting') await startTorrent(existing, { paused: true })
+      if (existing.status === 'paused' || existing.status === 'error' || existing.status === 'selecting' || !activeTorrents.get(slug) || activeTorrents.get(slug).destroyed) await startTorrent(existing, { paused: true })
       return { id: slug, downloads: getSnapshot() }
     }
     const item = {
@@ -902,7 +907,7 @@ function registerDownloadIpc() {
     downloads.set(slug, item)
     syncTray()
     try {
-      await startTorrent(item, { paused: true })
+      await startTorrent(item)
       syncTray()
       return { id: slug, downloads: getSnapshot() }
     } catch (error) {
@@ -1037,6 +1042,8 @@ async function registerAppProtocol() {
 }
 
 app.whenReady().then(async () => {
+  if (!singleInstanceLock) return
+  if (process.platform === 'win32') app.setAppUserModelId(APP_USER_MODEL_ID)
   Menu.setApplicationMenu(null)
   await loadDownloadState()
   applyStartupSetting()

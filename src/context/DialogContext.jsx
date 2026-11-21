@@ -10,10 +10,12 @@ export function DialogProvider({ children }) {
   const resolver = useRef(null);
 
   const settle = useCallback((answer) => {
-    resolver.current?.(answer);
+    resolver.current?.(dialog?.type === "confirm-checkbox"
+      ? { confirmed: Boolean(answer), checked: Boolean(dialog.checkboxChecked) }
+      : answer);
     resolver.current = null;
     setDialog(null);
-  }, []);
+  }, [dialog]);
 
   const confirm = useCallback((options) => new Promise((resolve) => {
     resolver.current = resolve;
@@ -24,6 +26,20 @@ export function DialogProvider({ children }) {
       cancelLabel: options?.cancelLabel || "Cancel",
       danger: Boolean(options?.danger),
       type: "confirm",
+    });
+  }), []);
+
+  const confirmWithCheckbox = useCallback((options) => new Promise((resolve) => {
+    resolver.current = resolve;
+    setDialog({
+      title: options?.title || "Are you sure?",
+      message: options?.message || "Please confirm this action.",
+      confirmLabel: options?.confirmLabel || "Continue",
+      cancelLabel: options?.cancelLabel || "Cancel",
+      danger: Boolean(options?.danger),
+      checkboxLabel: options?.checkboxLabel || "",
+      checkboxChecked: Boolean(options?.checkboxChecked),
+      type: "confirm-checkbox",
     });
   }), []);
 
@@ -46,7 +62,7 @@ export function DialogProvider({ children }) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [dialog, settle]);
 
-  return <DialogContext.Provider value={{ confirm, alert }}>
+  return <DialogContext.Provider value={{ confirm, confirmWithCheckbox, alert }}>
     {children}
     {dialog && <div className="app-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) settle(false); }}>
       <section className="app-dialog" role="alertdialog" aria-modal="true" aria-labelledby="app-dialog-title" aria-describedby="app-dialog-message">
@@ -54,8 +70,9 @@ export function DialogProvider({ children }) {
         <span className={`app-dialog-icon${dialog.danger ? " is-danger" : ""}`}><FontAwesomeIcon icon={faCircleExclamation} /></span>
         <h2 id="app-dialog-title">{dialog.title}</h2>
         <p id="app-dialog-message">{dialog.message}</p>
+        {dialog.checkboxLabel && <label className="app-dialog-checkbox"><input type="checkbox" checked={Boolean(dialog.checkboxChecked)} onChange={(event) => setDialog((current) => current ? { ...current, checkboxChecked: event.target.checked } : current)} /><span>{dialog.checkboxLabel}</span></label>}
         <div className="app-dialog-actions">
-          {dialog.type === "confirm" && <button type="button" className="app-dialog-cancel" onClick={() => settle(false)}>{dialog.cancelLabel}</button>}
+          {dialog.type !== "alert" && <button type="button" className="app-dialog-cancel" onClick={() => settle(false)}>{dialog.cancelLabel}</button>}
           <button type="button" className={`app-dialog-confirm${dialog.danger ? " is-danger" : ""}`} autoFocus onClick={() => settle(true)}>{dialog.confirmLabel}</button>
         </div>
       </section>
