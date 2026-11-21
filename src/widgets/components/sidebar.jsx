@@ -22,6 +22,7 @@ import {
   faReceipt,
   faHeadset,
   faScrewdriverWrench,
+  faBug,
   faStar,
   faGear,
 } from "@fortawesome/free-solid-svg-icons";
@@ -78,6 +79,7 @@ const navigation = [
         requiresAdmin: true,
       },
       { label: "Support tickets", to: "/support", icon: faHeadset },
+      { label: "Report a problem", to: "/report-problem", icon: faBug },
     ],
   },
 ];
@@ -490,7 +492,7 @@ function Sidebar({ collapsed, onToggle }) {
                 )}
               </NavLink>
 
-              <button
+              {!window.gameonixDesktop && <button
                 type="button"
                 className="sidebar-logout-button"
                 onClick={openLogoutPopup}
@@ -499,7 +501,7 @@ function Sidebar({ collapsed, onToggle }) {
                 disabled={loggingOut}
               >
                 <FontAwesomeIcon icon={faArrowRightFromBracket} />
-              </button>
+              </button>}
             </div>
           ) : (
             <Link

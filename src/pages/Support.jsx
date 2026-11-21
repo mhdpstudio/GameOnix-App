@@ -145,17 +145,18 @@ function getTicketStatus(ticket) {
   return "pending";
 }
 
-export default function Support() {
+export default function Support({ initialReport = false }) {
   const { confirm } = useDialog();
   const { user, authLoading } = useAuth();
   const [searchParams] = useSearchParams();
+  const reportMode = initialReport || searchParams.get("report") === "1";
   const [tickets, setTickets] = useState([]);
   const [loadingTickets, setLoadingTickets] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [ticketError, setTicketError] = useState("");
   const [activeTicketId, setActiveTicketId] = useState("");
-  const [showNewTicket, setShowNewTicket] = useState(false);
-  const [topic, setTopic] = useState("order");
+  const [showNewTicket, setShowNewTicket] = useState(reportMode);
+  const [topic, setTopic] = useState(reportMode ? "other" : "order");
   const [orderId, setOrderId] = useState(String(searchParams.get("order") || "").slice(0, 60));
   const [message, setMessage] = useState("");
   const [replyDraft, setReplyDraft] = useState("");
@@ -232,6 +233,10 @@ export default function Support() {
       return;
     }
     const honeypot = new FormData(event.currentTarget).get("website") || "";
+    const reportContext = reportMode
+      ? `[${window.gameonixDesktop ? "GameOnix Desktop" : "GameOnix website"} problem report · ${navigator.platform || "unknown device"}]\n`
+      : "";
+    const submittedMessage = `${reportContext}${trimmedMessage}`.slice(0, MAX_MESSAGE_LENGTH);
     setSubmitting(true);
     try {
       const token = await getCommunityApiToken();
@@ -239,7 +244,7 @@ export default function Support() {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: "Bearer " + token },
         credentials: "omit",
-        body: JSON.stringify({ topic, orderId: topic === "order" ? orderId.trim() : "", message: trimmedMessage, website: honeypot }),
+        body: JSON.stringify({ topic, orderId: topic === "order" ? orderId.trim() : "", message: submittedMessage, website: honeypot }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || "Couldn't create your ticket. Please try again.");
@@ -368,14 +373,15 @@ export default function Support() {
                 {ticketError && <p className="support-message is-error" role="alert">{ticketError}</p>}
                 {showNewTicket ? (
                   <div className="support-ticket-new">
-                    <div className="support-ticket-detail-heading"><div><span>NEW CONVERSATION</span><h2>Open a ticket</h2></div><button type="button" onClick={() => { setShowNewTicket(false); setTicketError(""); }}>Cancel</button></div>
+                    <div className="support-ticket-detail-heading"><div><span>{reportMode ? "REPORT AN ISSUE" : "NEW CONVERSATION"}</span><h2>{reportMode ? "Report a problem" : "Open a ticket"}</h2></div><button type="button" onClick={() => { setShowNewTicket(false); setTicketError(""); }}>Cancel</button></div>
+                    {reportMode && <p className="support-report-context">Tell us what went wrong. GameOnix will include your app or website and device details with the report.</p>}
                     <form className="support-form" onSubmit={handleSubmit} noValidate>
                       <TopicDropdown value={topic} onChange={(value) => { setTopic(value); if (value !== "order") setOrderId(""); }} />
                       {topic === "order" && <div className="support-field"><label htmlFor="support-order-id">Order ID <span>(optional)</span></label><input id="support-order-id" value={orderId} maxLength={60} autoComplete="off" onChange={(event) => setOrderId(event.target.value)} placeholder="Paste the request ID from My Orders" /></div>}
                       <div className="support-field"><label htmlFor="support-email">Account email</label><input id="support-email" type="email" value={user.email || ""} readOnly /></div>
-                      <div className="support-field"><label htmlFor="support-message">How can we help?</label><textarea id="support-message" rows={5} maxLength={MAX_MESSAGE_LENGTH} value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Describe the issue and what you expected." /><span className="support-char-count">{message.length} / {MAX_MESSAGE_LENGTH}</span></div>
+                      <div className="support-field"><label htmlFor="support-message">{reportMode ? "What went wrong?" : "How can we help?"}</label><textarea id="support-message" rows={5} maxLength={MAX_MESSAGE_LENGTH} value={message} onChange={(event) => setMessage(event.target.value)} placeholder={reportMode ? "Describe the problem and what you expected to happen." : "Describe the issue and what you expected."} /><span className="support-char-count">{message.length} / {MAX_MESSAGE_LENGTH}</span></div>
                       <input type="text" name="website" className="support-honeypot" tabIndex={-1} autoComplete="off" aria-hidden="true" />
-                      <button type="submit" className="support-submit" disabled={submitting}><FontAwesomeIcon icon={faPaperPlane} /> {submitting ? "Creating ticket..." : "Create ticket"}</button>
+                      <button type="submit" className="support-submit" disabled={submitting}><FontAwesomeIcon icon={faPaperPlane} /> {submitting ? (reportMode ? "Sending report..." : "Creating ticket...") : reportMode ? "Send report" : "Create ticket"}</button>
                     </form>
                   </div>
                 ) : activeTicket ? (

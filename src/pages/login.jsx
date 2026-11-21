@@ -240,7 +240,7 @@ function Login() {
       const data = await postJson("login", {
         identity,
         password: loginData.password,
-        rememberMe,
+        rememberMe: window.gameonixDesktop ? true : rememberMe,
       });
 
       if (!data.sessionToken) {
@@ -413,11 +413,11 @@ function Login() {
       const data = await postJson("verify-email", {
         email,
         code,
-        rememberMe,
+        rememberMe: window.gameonixDesktop ? true : rememberMe,
       });
 
       if (data.sessionToken) {
-        login(data.user, data.sessionToken, rememberMe);
+        login(data.user, data.sessionToken, window.gameonixDesktop ? true : rememberMe);
         navigate(redirectTo, { replace: true });
         return;
       }

@@ -2,6 +2,11 @@ const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('gameonixDesktop', {
   isDesktop: true,
+  authSession: {
+    get: () => ipcRenderer.invoke('auth-session:get'),
+    set: (token) => ipcRenderer.invoke('auth-session:set', token),
+    clear: () => ipcRenderer.invoke('auth-session:clear'),
+  },
   windowControls: {
     minimize: () => ipcRenderer.invoke('window:minimize'),
     toggleMaximize: () => ipcRenderer.invoke('window:toggle-maximize'),

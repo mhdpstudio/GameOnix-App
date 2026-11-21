@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, net, Notification, protocol, shell, Tray } = require('electron')
+const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, net, Notification, protocol, safeStorage, shell, Tray } = require('electron')
 const fs = require('node:fs/promises')
 const fsSync = require('node:fs')
 const path = require('node:path')
@@ -25,6 +25,7 @@ let torrentClient
 let downloadDirectory
 let downloadTimer
 let settingsPath
+let authSessionPath
 let downloadsPath
 let updateCheckPromise
 let updateDownloadPromise
@@ -525,6 +526,7 @@ async function startTorrent(item, { paused = false } = {}) {
 
 async function loadDownloadState() {
   settingsPath = path.join(app.getPath('userData'), 'gameonix-downloads.json')
+  authSessionPath = path.join(app.getPath('userData'), 'gameonix-session-token.bin')
   downloadsPath = settingsPath
   const defaultDirectory = path.join(app.getPath('downloads'), 'GameOnix')
   try {
@@ -665,8 +667,12 @@ function createWindow({ startHidden = false } = {}) {
   window.on('maximize', publishWindowState)
   window.on('unmaximize', publishWindowState)
   window.once('ready-to-show', () => {
+    if (startHidden) {
+      window.maximize()
+      return
+    }
+    window.show()
     window.maximize()
-    if (!startHidden) window.show()
   })
   window.on('close', (event) => {
     if (isQuitting || (!appSettings.closeToTray && !hasActiveDownloads())) return
@@ -692,6 +698,26 @@ function createWindow({ startHidden = false } = {}) {
 }
 
 function registerDownloadIpc() {
+  ipcMain.handle('auth-session:get', async (event) => {
+    requireTrustedFrame(event)
+    if (!safeStorage.isEncryptionAvailable()) return ''
+    try {
+      return safeStorage.decryptString(await fs.readFile(authSessionPath))
+    } catch {
+      return ''
+    }
+  })
+  ipcMain.handle('auth-session:set', async (event, token) => {
+    requireTrustedFrame(event)
+    if (typeof token !== 'string' || !token || token.length > 8192 || !safeStorage.isEncryptionAvailable()) return false
+    await fs.writeFile(authSessionPath, safeStorage.encryptString(token))
+    return true
+  })
+  ipcMain.handle('auth-session:clear', async (event) => {
+    requireTrustedFrame(event)
+    await fs.rm(authSessionPath, { force: true })
+    return true
+  })
   ipcMain.handle('notifications:set-unread-count', (event, count) => {
     requireTrustedFrame(event)
     const unreadCount = Math.max(0, Math.min(999999, Math.floor(Number(count) || 0)))

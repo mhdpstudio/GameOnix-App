@@ -53,6 +53,9 @@ function SiteStatusGate({ children }) {
 
   useEffect(() => {
     let active = true;
+    const startupFallback = window.setTimeout(() => {
+      if (active) setSiteControl((current) => current || { mode: "online" });
+    }, 1200);
     const refresh = async () => {
       try {
         const response = await fetch(SITE_STATUS_URL, {
@@ -82,6 +85,7 @@ function SiteStatusGate({ children }) {
     window.addEventListener("focus", refresh);
     return () => {
       active = false;
+      window.clearTimeout(startupFallback);
       window.clearInterval(interval);
       window.removeEventListener("focus", refresh);
     };
@@ -139,6 +143,7 @@ function App() {
           <Route path="/admin-actions" element={<AdminActions />} />
           <Route path="/orders" element={<Orders />} />
           <Route path="/support" element={<Support />} />
+          <Route path="/report-problem" element={<Support initialReport />} />
           <Route path="/reviews" element={<ReviewsPage />} />
 
           <Route path="/games" element={<Games />} />

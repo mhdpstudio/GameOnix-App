@@ -85,6 +85,29 @@ export function getSessionToken() {
   );
 }
 
+async function getPersistentSessionToken() {
+  const desktopSession = window.gameonixDesktop?.authSession;
+  if (desktopSession) {
+    try {
+      const token = await desktopSession.get();
+      if (token) {
+        localStorage.setItem(SESSION_TOKEN_KEY, token);
+        return token;
+      }
+    } catch (error) {
+      console.warn("Could not read the encrypted desktop session:", error);
+    }
+  }
+
+  const token = getSessionToken();
+  if (token && desktopSession) {
+    void desktopSession.set(token).catch((error) => {
+      console.warn("Could not migrate the desktop session:", error);
+    });
+  }
+  return token;
+}
+
 export function storeSessionToken(token, rememberMe = true) {
   localStorage.removeItem(SESSION_TOKEN_KEY);
   sessionStorage.removeItem(SESSION_TOKEN_KEY);
@@ -94,16 +117,26 @@ export function storeSessionToken(token, rememberMe = true) {
   } else {
     sessionStorage.setItem(SESSION_TOKEN_KEY, token);
   }
+  if (window.gameonixDesktop?.authSession) {
+    void window.gameonixDesktop.authSession.set(token).catch((error) => {
+      console.warn("Could not save the encrypted desktop session:", error);
+    });
+  }
 }
 
 export function clearSessionToken() {
   localStorage.removeItem(SESSION_TOKEN_KEY);
   sessionStorage.removeItem(SESSION_TOKEN_KEY);
+  if (window.gameonixDesktop?.authSession) {
+    void window.gameonixDesktop.authSession.clear().catch((error) => {
+      console.warn("Could not clear the encrypted desktop session:", error);
+    });
+  }
 }
 
-export function authFetch(input, options = {}) {
+export async function authFetch(input, options = {}) {
   const headers = new Headers(options.headers);
-  const token = getSessionToken();
+  const token = await getPersistentSessionToken();
 
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
