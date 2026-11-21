@@ -89,7 +89,14 @@ function SiteStatusGate({ children }) {
 
   const content = siteControl ? SITE_MODE_CONTENT[siteControl.mode] : null;
   if (!siteControl) {
-    return <main className="site-control-screen is-checking" aria-hidden="true" />;
+    return <main className="site-control-screen is-checking" role="status" aria-live="polite">
+      <section className="site-control-loading">
+        <span className="site-control-loader" aria-hidden="true" />
+        <span className="site-control-eyebrow">GAMEONIX DESKTOP</span>
+        <h1>Getting things ready</h1>
+        <p>Connecting to GameOnix. Your library will appear in a moment.</p>
+      </section>
+    </main>;
   }
 
   if (content) {

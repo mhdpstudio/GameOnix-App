@@ -88,4 +88,52 @@
 .site-control-screen.is-upgrade .site-control-eyebrow { color: #86d9dc; }
 .site-control-screen.is-upgrade .site-control-mark { border-color: rgba(91, 205, 208, .35); color: #a6eff0; background: rgba(45, 167, 171, .13); }
 
-.site-control-screen.is-checking { padding: 0; background: #0a0d16; }
+.site-control-screen.is-checking {
+  padding: 28px;
+  background:
+    radial-gradient(ellipse at 50% 40%, rgba(124, 93, 255, .12), transparent 48%),
+    #0a0d16;
+}
+
+.site-control-loading {
+  display: flex;
+  width: min(100%, 440px);
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.site-control-loader {
+  width: 42px;
+  height: 42px;
+  margin-bottom: 24px;
+  border: 3px solid rgba(157, 132, 255, .2);
+  border-top-color: #9d84ff;
+  border-radius: 50%;
+  animation: site-control-spin .8s linear infinite;
+  box-shadow: 0 0 26px rgba(124, 93, 255, .16);
+}
+
+.site-control-loading h1 {
+  margin: 12px 0 8px;
+  color: #f3f5fb;
+  font-size: clamp(24px, 4vw, 32px);
+  line-height: 1.2;
+}
+
+.site-control-loading p {
+  max-width: 360px;
+  margin: 0;
+  color: #aab3c5;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.gameonix-desktop .site-control-screen.is-checking {
+  min-height: calc(100vh - 36px);
+  margin-top: 36px;
+}
+
+@keyframes site-control-spin {
+  to { transform: rotate(360deg); }
+}
