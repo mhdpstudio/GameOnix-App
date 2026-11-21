@@ -413,7 +413,7 @@ function getSnapshot() {
 
 async function persistDownloads() {
   if (!downloadsPath) return
-  const records = [...downloads.values()].map(({ samples, smoothedSpeed, targetDirectory, ...item }) => item)
+  const records = [...downloads.values()].map(({ samples, smoothedSpeed, targetDirectory, lastBitfieldCheckpointAt, ...item }) => item)
   const temporaryPath = `${downloadsPath}.tmp`
   await fs.writeFile(temporaryPath, JSON.stringify({ downloadDirectory, settings: appSettings, downloads: records }, null, 2), 'utf8')
   await fs.rename(temporaryPath, downloadsPath)
@@ -482,9 +482,14 @@ function getSmoothedSpeed(torrent, item) {
 function startStatsTimer() {
   if (downloadTimer) return
   downloadTimer = setInterval(() => {
+    const now = Date.now()
     for (const [id, torrent] of activeTorrents) {
       const item = downloads.get(id)
       if (!item || !torrent || torrent.destroyed) continue
+      if (torrent.ready && now - (item.lastBitfieldCheckpointAt || 0) >= 10_000) {
+        item.bitfield = Buffer.from(torrent.bitfield.buffer).toString('base64')
+        item.lastBitfieldCheckpointAt = now
+      }
       const speed = torrent.paused ? 0 : getSmoothedSpeed(torrent, item)
       const selected = Array.isArray(item.selectedFiles) ? item.selectedFiles : []
       const files = selected.map((index) => torrent.files?.[index]).filter(Boolean)
@@ -537,6 +542,14 @@ async function startTorrent(item, { paused = false } = {}) {
   item.samples = []
   item.lastSample = null
 
+  let savedBitfield
+  if (typeof item.bitfield === 'string' && item.bitfield.length <= 16_000_000) {
+    try {
+      const bytes = Buffer.from(item.bitfield, 'base64')
+      if (bytes.length && bytes.toString('base64') === item.bitfield) savedBitfield = new Uint8Array(bytes)
+    } catch {}
+  }
+
   const torrent = client.add(item.torrentUrl, {
     path: item.targetDirectory,
     // Keep peer discovery alive while the user chooses files. `deselect: true`
@@ -546,6 +559,7 @@ async function startTorrent(item, { paused = false } = {}) {
     maxWebConns: 8,
     destroyStoreOnDestroy: false,
     deselect: true,
+    ...(savedBitfield ? { bitfield: savedBitfield } : {}),
   })
   activeTorrents.set(item.id, torrent)
   let resolveTorrentReady
@@ -740,6 +754,15 @@ function createWindow({ startHidden = false } = {}) {
     },
   })
   if (!appIcon.isEmpty()) window.setIcon(appIcon)
+  if (process.platform === 'win32') {
+    window.setAppDetails({
+      appId: APP_USER_MODEL_ID,
+      appIconPath: getAppIconPath(),
+      appIconIndex: 0,
+      relaunchCommand: `"${process.execPath}"`,
+      relaunchDisplayName: 'GameOnix',
+    })
+  }
   windows.add(window)
   updateTaskbarNotificationOverlay()
   const publishWindowState = () => {
@@ -1084,15 +1107,21 @@ app.on('before-quit', (event) => {
   event.preventDefault()
   if (shutdownInProgress) return
   shutdownInProgress = true
-  for (const [id, torrent] of activeTorrents) {
-    const item = downloads.get(id)
-    if (!item || !torrent || torrent.destroyed) continue
-    item.downloaded = Number(torrent.downloaded) || item.downloaded
-    item.total = Number(torrent.length) || item.total
-    item.progress = Number(torrent.progress) || item.progress
-    item.status = torrent.done ? 'completed' : torrent.paused ? 'paused' : 'downloading'
+  const checkpointAndPause = async () => {
+    for (const [id, torrent] of activeTorrents) {
+      const item = downloads.get(id)
+      if (!item || !torrent || torrent.destroyed) continue
+      const wasPaused = torrent.paused
+      item.downloaded = Number(torrent.downloaded) || item.downloaded
+      item.total = Number(torrent.length) || item.total
+      item.progress = Number(torrent.progress) || item.progress
+      item.status = torrent.done ? 'completed' : wasPaused ? 'paused' : 'downloading'
+      if (torrent.bitfield?.buffer) item.bitfield = Buffer.from(torrent.bitfield.buffer).toString('base64')
+      if (!wasPaused && !torrent.done) pauseTorrentRequests(torrent)
+    }
+    await persistDownloads()
   }
-  void persistDownloads().catch((error) => console.error('Could not save download state before closing:', error)).finally(() => {
+  void checkpointAndPause().catch((error) => console.error('Could not save download checkpoints before closing:', error)).finally(() => {
     try {
       torrentClient.destroy((error) => {
         if (error) console.error('Could not close the torrent client cleanly:', error)
