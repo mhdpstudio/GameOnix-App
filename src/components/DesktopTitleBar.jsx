@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { faArrowLeft, faArrowRight } from "@fortawesome/free-solid-svg-icons";
 import "../style/desktop-titlebar.css";
 
 export default function DesktopTitleBar() {
@@ -21,7 +23,7 @@ export default function DesktopTitleBar() {
   if (!desktop) return null;
 
   const updateText = update?.status === "downloading"
-    ? `Downloading update ${Math.round(update.progress || 0)}%`
+    ? `Update ${Math.round(update.progress || 0)}%`
     : update?.status === "restarting"
       ? "Restarting to finish update…"
       : update?.status === "error"
@@ -30,10 +32,16 @@ export default function DesktopTitleBar() {
 
   return <header className="desktop-titlebar">
     <div className="desktop-titlebar-drag">
+      <div className="desktop-titlebar-navigation">
+        <button type="button" aria-label="Go back" title="Go back" onClick={() => desktop.windowControls.back()}><FontAwesomeIcon icon={faArrowLeft} /></button>
+        <button type="button" aria-label="Go forward" title="Go forward" onClick={() => desktop.windowControls.forward()}><FontAwesomeIcon icon={faArrowRight} /></button>
+      </div>
       <img src="./logo.png" alt="" />
       <span>GameOnix</span>
-      <small>DESKTOP</small>
-      {updateText && <span className={`desktop-update-indicator is-${update.status}`} title={update.error || "GameOnix update"}>{updateText}</span>}
+      {updateText && <span className={`desktop-update-indicator is-${update.status}`} title={update.error || "GameOnix update"}>
+        {update.status === "downloading" && <i style={{ width: `${Math.max(0, Math.min(100, update.progress || 0))}%` }} />}
+        {updateText}
+      </span>}
     </div>
     <div className="desktop-titlebar-controls">
       <button type="button" aria-label="Minimize" title="Minimize" onClick={() => desktop.windowControls.minimize()}><span className="titlebar-minimize" /></button>

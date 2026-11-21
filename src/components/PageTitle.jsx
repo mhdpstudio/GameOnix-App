@@ -8,6 +8,8 @@ const pageTitles = {
   "/discover": "Discover Games",
   "/games": "Browse Games",
   "/library": "My Library",
+  "/downloads": "Downloads",
+  "/settings": "Settings",
   "/login": "Login",
   "/register": "Create Account",
   "/profile": "Your Profile",

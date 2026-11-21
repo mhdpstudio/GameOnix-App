@@ -1,0 +1,51 @@
+.settings-page { width: min(1080px, 100%); margin: 0 auto; padding: 12px 0 60px; color: #f4f1ff; }
+.settings-heading { margin: 0 0 28px; }
+.settings-eyebrow { color: #a58aff; font-size: 10px; font-weight: 800; letter-spacing: .16em; }
+.settings-heading h1 { margin: 8px 0 5px; font-size: clamp(30px, 4vw, 42px); letter-spacing: -.04em; }
+.settings-heading p, .settings-panel-heading p { margin: 0; color: #9692a2; font-size: 13px; }
+.settings-panel { margin: 0 0 16px; padding: 23px 26px 8px; border: 1px solid #2c2a35; border-radius: 17px; background: linear-gradient(145deg, #15141b, #101116); }
+.settings-panel-heading { display: flex; align-items: center; gap: 14px; padding-bottom: 19px; border-bottom: 1px solid #292731; }
+.settings-panel-heading > span { display: grid; width: 42px; height: 42px; flex: 0 0 auto; place-items: center; border: 1px solid #7958df55; border-radius: 13px; background: #7451df1a; color: #b299ff; }
+.settings-panel-heading h2 { margin: 0 0 4px; font-size: 17px; }
+.settings-switch-row, .settings-folder-row { display: flex; align-items: center; justify-content: space-between; gap: 24px; min-height: 83px; padding: 17px 0; border-bottom: 1px solid #292731; }
+.settings-switch-row:last-child, .settings-folder-row:last-child { border-bottom: 0; }
+.settings-switch-row strong, .settings-folder-row strong { font-size: 13px; }
+.settings-switch-row p, .settings-folder-row p { max-width: 680px; margin: 5px 0 0; color: #918c9c; font-size: 12px; line-height: 1.65; }
+.settings-switch { position: relative; width: 46px; height: 26px; flex: 0 0 auto; padding: 3px; border: 1px solid #423e4a; border-radius: 30px; background: #2a2831; cursor: pointer; transition: background .18s ease, border-color .18s ease; }
+.settings-switch > span { display: block; width: 18px; height: 18px; border-radius: 50%; background: #aaa5b1; transition: transform .18s ease, background .18s ease; }
+.settings-switch.is-on { border-color: #8f70f1; background: #704de1; }
+.settings-switch.is-on > span { transform: translateX(19px); background: white; }
+.settings-switch:disabled { opacity: .5; cursor: wait; }
+.settings-folder-row code { display: block; max-width: min(700px, 62vw); overflow: hidden; margin-top: 10px; color: #b6a9d7; font-family: inherit; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.settings-secondary-button { display: inline-flex; min-height: 40px; flex: 0 0 auto; align-items: center; justify-content: center; gap: 9px; padding: 0 14px; border: 1px solid #443c56; border-radius: 10px; background: #201d29; color: #e9e4f4; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.settings-secondary-button:hover:not(:disabled) { border-color: #9476ed; background: #292336; }
+.settings-secondary-button:disabled { opacity: .5; cursor: wait; }
+.settings-update-version { display: flex; align-items: center; gap: 12px; padding: 20px 0; }
+.settings-version-mark { display: grid; width: 42px; height: 42px; flex: 0 0 auto; place-items: center; border-radius: 12px; background: #242031; color: #b49bff; }
+.settings-update-version > div:nth-child(2) { display: flex; min-width: 130px; flex-direction: column; gap: 3px; }
+.settings-update-version > div:nth-child(2) strong { font-size: 13px; }
+.settings-update-version > div:nth-child(2) span { color: #8f899a; font-size: 11px; }
+.settings-update-badge { display: inline-flex; min-width: 0; align-items: center; gap: 8px; margin-left: auto; padding: 7px 10px; border: 1px solid #34313e; border-radius: 999px; background: #1d1b24; color: #a9a3b4; font-size: 11px; }
+.settings-update-badge.is-current { border-color: #237c5b55; background: #153226; color: #7ce0b4; }
+.settings-update-badge.is-downloading, .settings-update-badge.is-available { border-color: #7559cb55; background: #251e39; color: #c7b4ff; }
+.settings-update-badge.is-error { border-color: #a3454c66; background: #351d21; color: #ff9d9d; }
+.settings-update-progress { padding: 0 0 20px; }
+.settings-update-progress > div:first-child { display: flex; justify-content: space-between; margin-bottom: 8px; color: #d5cfea; font-size: 12px; }
+.settings-progress-track { height: 9px; overflow: hidden; border-radius: 99px; background: #292631; }
+.settings-progress-track > span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #7049df, #b49aff); transition: width .3s ease; }
+.settings-update-progress small { display: block; margin-top: 8px; color: #898493; font-size: 11px; line-height: 1.6; }
+.settings-update-error, .settings-error { color: #ff9a9a; font-size: 12px; }
+.settings-update-actions { display: flex; align-items: center; gap: 13px; padding: 15px 0 17px; border-top: 1px solid #292731; }
+.settings-update-actions > span { color: #898493; font-size: 11px; }
+.settings-web-fallback { padding: 30px; }
+.settings-web-fallback h1 { margin-top: 0; }
+.settings-web-fallback p { color: #9b96a6; }
+.settings-web-fallback a { display: inline-flex; margin-top: 10px; color: #b49aff; }
+@media (max-width: 720px) {
+  .settings-page { padding-top: 0; }
+  .settings-panel { padding: 18px 17px 5px; }
+  .settings-folder-row, .settings-update-actions { align-items: flex-start; flex-direction: column; }
+  .settings-folder-row code { max-width: calc(100vw - 80px); }
+  .settings-update-version { align-items: flex-start; flex-wrap: wrap; }
+  .settings-update-badge { margin-left: 54px; }
+}

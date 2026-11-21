@@ -63,3 +63,13 @@ svg {
   color: #fff;
   background: var(--primary);
 }
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #7651df #111116;
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: #111116; }
+::-webkit-scrollbar-thumb { border: 2px solid #111116; border-radius: 999px; background: linear-gradient(180deg, #9a78ff, #6842d0); }
+::-webkit-scrollbar-thumb:hover { background: #ad95ff; }

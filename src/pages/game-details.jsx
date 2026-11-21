@@ -39,6 +39,7 @@ import { getGameCategories } from "../utils/game-categories";
 import { getAddonList } from "../utils/addons";
 import { GameReviews } from "./reviews";
 import { useGameCatalog } from "../hooks/useGameCatalog";
+import { useDialog } from "../context/DialogContext";
 
 import "./../style/game-details-style.css";
 
@@ -176,6 +177,7 @@ function isLoginError(err) {
 function GameDetails() {
     const { slug } = useParams();
     const navigate = useNavigate();
+    const { confirm, alert } = useDialog();
     const { user } = useAuth();
     const { games: allGames, loading: catalogLoading, error: catalogError } = useGameCatalog();
 
@@ -191,7 +193,6 @@ function GameDetails() {
     const [favoritesLoaded, setFavoritesLoaded] = useState(false);
     const [favoriteBusy, setFavoriteBusy] = useState(false);
     const [favoriteError, setFavoriteError] = useState("");
-    const [downloadError, setDownloadError] = useState("");
     const [downloadStarting, setDownloadStarting] = useState(false);
     const [showFavoriteMessage, setShowFavoriteMessage] = useState(false);
     const [follows, setFollows] = useState([]);
@@ -203,8 +204,16 @@ function GameDetails() {
     async function startDesktopDownload() {
         if (!window.gameonixDesktop || !game) return;
         setDownloadStarting(true);
-        setDownloadError("");
         try {
+            const preferences = await window.gameonixDesktop.settings.get();
+            if (preferences.askBeforeDownload) {
+                const accepted = await confirm({
+                    title: "Start this download?",
+                    message: `${game.title} will be downloaded to:\n${preferences.downloadDirectory}`,
+                    confirmLabel: "Start download",
+                });
+                if (!accepted) return;
+            }
             await window.gameonixDesktop.downloads.start({
                 slug: game.slug,
                 title: game.title,
@@ -213,7 +222,7 @@ function GameDetails() {
             void recordGameActivity(game.slug, "download").catch(() => {});
             navigate("/downloads");
         } catch (reason) {
-            setDownloadError(reason?.message || "Could not start the download.");
+            void alert({ title: "Download could not start", message: reason?.message || "Try again from the game page." });
         } finally {
             setDownloadStarting(false);
         }
@@ -925,7 +934,6 @@ function GameDetails() {
                                 {favoriteError}
                             </p>
                         )}
-                        {downloadError && <p className="favorite-error" role="alert">{downloadError}</p>}
                         {followError && <p className="favorite-error" role="alert">{followError}</p>}
                         <button
                             type="button"

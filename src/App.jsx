@@ -23,6 +23,8 @@ import Support from "./pages/Support";
 import ReviewsPage from "./pages/reviews";
 
 import PageTitle from "./components/PageTitle";
+import Settings from "./pages/settings";
+import { DialogProvider } from "./context/DialogContext";
 import "./style/site-control.css";
 
 const SITE_STATUS_URL =
@@ -111,6 +113,7 @@ function SiteStatusGate({ children }) {
 function App() {
   return (
     <AuthProvider>
+      <DialogProvider>
       <SiteStatusGate>
         <PageTitle />
 
@@ -120,6 +123,7 @@ function App() {
           <Route path="/discover" element={<Discover />} />
           <Route path="/library" element={<Library />} />
           <Route path="/downloads" element={<Downloads />} />
+          <Route path="/settings" element={<Settings />} />
           <Route path="/login" element={<Login />} />
           <Route path="/profile" element={<Profile />} />
           <Route path="/wallet" element={<Wallet />} />
@@ -144,6 +148,7 @@ function App() {
           </Route>
         </Routes>
       </SiteStatusGate>
+      </DialogProvider>
     </AuthProvider>
   );
 }

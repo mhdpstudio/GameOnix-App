@@ -23,6 +23,7 @@ import {
   faHeadset,
   faScrewdriverWrench,
   faStar,
+  faGear,
 } from "@fortawesome/free-solid-svg-icons";
 
 import { useAuth } from "../../context/AuthContext";
@@ -42,6 +43,7 @@ const navigation = [
       { label: "Discover", to: "/discover", icon: faCompass },
       { label: "My Library", to: "/library", icon: faBookOpen },
       { label: "Downloads", to: "/downloads", icon: faDownload, desktopOnly: true },
+      { label: "Settings", to: "/settings", icon: faGear, desktopOnly: true },
       { label: "Request a Game", to: "/request-game", icon: faHandPointUp },
       { label: "Reviews", to: "/reviews", icon: faStar },
     ],

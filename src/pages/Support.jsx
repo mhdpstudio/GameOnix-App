@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { useDialog } from "../context/DialogContext";
 import { faArrowRight, faCheck, faChevronDown, faCircleQuestion, faGift, faLock, faPaperPlane, faPen, faPlus, faReceipt, faRotateRight, faTicket, faTrashCan, faUserShield, faWallet } from "@fortawesome/free-solid-svg-icons";
 import { faWhatsapp } from "@fortawesome/free-brands-svg-icons";
 import { useAuth } from "../context/AuthContext";
@@ -145,6 +146,7 @@ function getTicketStatus(ticket) {
 }
 
 export default function Support() {
+  const { confirm } = useDialog();
   const { user, authLoading } = useAuth();
   const [searchParams] = useSearchParams();
   const [tickets, setTickets] = useState([]);
@@ -256,7 +258,15 @@ export default function Support() {
 
   async function moderateTicketMessage(action, ticketId, messageId, text = "") {
     if (!ticketId || !messageId || messageActionId) return;
-    if (action === "delete" && !window.confirm("Delete this message? It will be removed from the conversation.")) return;
+    if (action === "delete") {
+      const accepted = await confirm({
+        title: "Delete this message?",
+        message: "It will be removed from the conversation and cannot be restored.",
+        confirmLabel: "Delete message",
+        danger: true,
+      });
+      if (!accepted) return;
+    }
     setMessageActionId(messageId);
     setTicketError("");
     try {

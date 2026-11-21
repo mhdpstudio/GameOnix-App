@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faArrowDown, faCheck, faClock, faDownload, faFolderOpen, faPause, faPlay, faTrash, faWifi } from "@fortawesome/free-solid-svg-icons";
+import { useDialog } from "../context/DialogContext";
 import "../style/downloads-style.css";
 
 function formatBytes(bytes) {
@@ -37,6 +38,7 @@ export default function Downloads() {
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState("");
   const desktop = window.gameonixDesktop;
+  const { confirm } = useDialog();
 
   const refresh = useCallback(async () => {
     if (!desktop) return;
@@ -74,17 +76,22 @@ export default function Downloads() {
   }
 
   async function removeDownload(item, deleteFiles = false) {
-    const message = deleteFiles
-      ? `Delete the downloaded files for ${item.title} from your device?`
-      : `Remove ${item.title} from this list? Downloaded files will be kept.`;
-    if (!window.confirm(message)) return;
+    const accepted = await confirm({
+      title: deleteFiles ? "Delete downloaded files?" : "Remove this download?",
+      message: deleteFiles
+        ? `Delete ${item.title} and its downloaded files from your device? This cannot be undone.`
+        : `Remove ${item.title} from this list? Its downloaded files will be kept.`,
+      confirmLabel: deleteFiles ? "Delete files" : "Remove download",
+      danger: deleteFiles,
+    });
+    if (!accepted) return;
     await runAction(item.id, () => desktop.downloads.remove(item.id, deleteFiles));
   }
 
   if (!desktop) return <main className="downloads-page"><section className="downloads-empty"><FontAwesomeIcon icon={faDownload} /><h1>Downloads are available in GameOnix Desktop</h1><p>Install the GameOnix app to download torrents and track their progress here.</p><Link to="/games">Browse games</Link></section></main>;
 
   return <main className="downloads-page">
-    <header className="downloads-heading"><div><span className="downloads-eyebrow">GAMEONIX DESKTOP</span><h1>Downloads</h1><p>Track active torrents and find completed games in one place.</p></div><button type="button" className="downloads-folder-button" onClick={() => void runAction("folder", async () => { const next = await desktop.downloads.chooseDirectory(); if (next) setFolder(next); })}><FontAwesomeIcon icon={faFolderOpen} /> Change folder</button></header>
+    <header className="downloads-heading"><div><span className="downloads-eyebrow">GAMEONIX DESKTOP</span><h1>Downloads</h1><p>Track active torrents and find completed games in one place.</p></div><Link to="/settings" className="downloads-folder-button"><FontAwesomeIcon icon={faFolderOpen} /> Manage download settings</Link></header>
     <section className="downloads-summary"><article><span>Active downloads</span><strong>{activeCount}</strong></article><article><span>Completed</span><strong>{completedCount}</strong></article><article className="downloads-location"><span>Save location</span><strong title={folder}>{folder || "Loading..."}</strong></article></section>
     {error && <div className="downloads-error" role="alert">{error}</div>}
     {!items.length ? <section className="downloads-empty"><span className="downloads-empty-icon"><FontAwesomeIcon icon={faArrowDown} /></span><h2>Your downloads will show here</h2><p>Open a game page and choose <strong>Download Game</strong> to start its torrent.</p><Link to="/games">Browse games</Link></section> : <section className="downloads-list" aria-label="Download list">{items.map((item) => {

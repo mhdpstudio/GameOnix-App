@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { useDialog } from "../context/DialogContext";
 import {
   faBell,
   faCheck,
@@ -97,6 +98,7 @@ async function compressNotificationImage(file) {
 }
 
 function Notifications() {
+  const { confirm } = useDialog();
   const { user, authLoading } = useAuth();
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -344,12 +346,14 @@ function Notifications() {
   }
 
   async function deleteAll() {
-    if (
-      !notifications.length ||
-      !window.confirm("Delete all notifications? This cannot be undone.")
-    ) {
-      return;
-    }
+    if (!notifications.length) return;
+    const accepted = await confirm({
+      title: "Delete all notifications?",
+      message: "This removes every notification from your account and cannot be undone.",
+      confirmLabel: "Delete all",
+      danger: true,
+    });
+    if (!accepted) return;
     const result = await updateNotifications("DELETE", { deleteAll: true });
     if (result) {
       setNotifications([]);

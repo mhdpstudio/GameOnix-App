@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld('gameonixDesktop', {
       ipcRenderer.on('window:state', listener)
       return () => ipcRenderer.removeListener('window:state', listener)
     },
+    back: () => ipcRenderer.invoke('window:back'),
+    forward: () => ipcRenderer.invoke('window:forward'),
   },
   updates: {
     getState: () => ipcRenderer.invoke('updates:get-state'),
@@ -21,6 +23,10 @@ contextBridge.exposeInMainWorld('gameonixDesktop', {
       ipcRenderer.on('updates:state', listener)
       return () => ipcRenderer.removeListener('updates:state', listener)
     },
+  },
+  settings: {
+    get: () => ipcRenderer.invoke('settings:get'),
+    update: (patch) => ipcRenderer.invoke('settings:update', patch),
   },
   downloads: {
     list: () => ipcRenderer.invoke('downloads:list'),

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, shell } = require('electron')
+const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, net, protocol, shell, Tray } = require('electron')
 const fs = require('node:fs/promises')
 const fsSync = require('node:fs')
 const path = require('node:path')
@@ -9,6 +9,7 @@ const { pipeline } = require('node:stream/promises')
 const { pathToFileURL } = require('node:url')
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }])
+if (process.platform === 'win32') app.setAppUserModelId('com.gameonix.desktop')
 
 const DEV_URL = 'http://localhost:5173'
 const TRUSTED_TORRENT_PREFIX = 'https://raw.githubusercontent.com/mhdpstudio/GameOnix-Data-Content/main/downloads/'
@@ -26,6 +27,15 @@ let downloadsPath
 let updateCheckPromise
 let updateDownloadPromise
 let updateCheckTimer
+let tray
+let isQuitting = false
+let shutdownInProgress = false
+let shutdownComplete = false
+let appSettings = {
+  closeToTray: true,
+  launchAtStartup: false,
+  askBeforeDownload: true,
+}
 let updaterState = { status: 'idle', currentVersion: app.getVersion(), availableVersion: '', progress: 0, error: '' }
 
 function publishUpdaterState() {
@@ -125,6 +135,7 @@ try {
     child.once('spawn', () => { child.unref(); resolve() })
   })
   setUpdaterState({ status: 'restarting', progress: 100, availableVersion: version })
+  isQuitting = true
   app.quit()
 }
 
@@ -210,7 +221,7 @@ async function persistDownloads() {
   if (!downloadsPath) return
   const records = [...downloads.values()].map(({ samples, smoothedSpeed, targetDirectory, ...item }) => item)
   const temporaryPath = `${downloadsPath}.tmp`
-  await fs.writeFile(temporaryPath, JSON.stringify({ downloadDirectory, downloads: records }, null, 2), 'utf8')
+  await fs.writeFile(temporaryPath, JSON.stringify({ downloadDirectory, settings: appSettings, downloads: records }, null, 2), 'utf8')
   await fs.rename(temporaryPath, downloadsPath)
 }
 
@@ -348,6 +359,9 @@ async function loadDownloadState() {
   try {
     const state = JSON.parse(await fs.readFile(downloadsPath, 'utf8'))
     downloadDirectory = state.downloadDirectory || defaultDirectory
+    if (state.settings && typeof state.settings === 'object') {
+      appSettings = { ...appSettings, ...state.settings }
+    }
     for (const saved of Array.isArray(state.downloads) ? state.downloads : []) {
       const id = safeSlug(saved.id)
       const item = {
@@ -369,6 +383,67 @@ async function loadDownloadState() {
   await fs.mkdir(downloadDirectory, { recursive: true })
 }
 
+function getAppIconPath() {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'gameonix.ico')
+    : path.join(__dirname, '..', 'build', 'gameonix.ico')
+}
+
+function getTrayIconPath() {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'gameonix-icon.png')
+    : path.join(__dirname, '..', 'build', 'gameonix-icon.png')
+}
+
+function getMainWindow() {
+  return [...windows].find((window) => !window.isDestroyed())
+}
+
+function showMainWindow() {
+  let window = getMainWindow()
+  if (!window) window = createWindow()
+  if (window.isMinimized()) window.restore()
+  window.maximize()
+  window.show()
+  window.focus()
+  return window
+}
+
+function openMainRoute(route) {
+  const window = showMainWindow()
+  window.webContents.executeJavaScript(`window.location.hash = ${JSON.stringify(`#${route}`)}`).catch(() => {})
+}
+
+function syncTray() {
+  if (!appSettings.closeToTray && !appSettings.launchAtStartup) {
+    tray?.destroy()
+    tray = null
+    return
+  }
+  if (tray) return
+
+  const icon = nativeImage.createFromPath(getTrayIconPath()).resize({ width: 24, height: 24 })
+  tray = new Tray(icon)
+  tray.setToolTip('GameOnix')
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: 'Open GameOnix', click: showMainWindow },
+    { label: 'Downloads', click: () => openMainRoute('/downloads') },
+    { label: 'Settings', click: () => openMainRoute('/settings') },
+    { type: 'separator' },
+    { label: 'Quit GameOnix', click: () => { isQuitting = true; app.quit() } },
+  ]))
+  tray.on('click', showMainWindow)
+  tray.on('double-click', showMainWindow)
+}
+
+function applyStartupSetting() {
+  if (process.platform !== 'win32' || !app.isPackaged) return
+  app.setLoginItemSettings({
+    openAtLogin: Boolean(appSettings.launchAtStartup),
+    args: ['--startup'],
+  })
+}
+
 async function restoreDownloads() {
   for (const item of downloads.values()) {
     if (item.status === 'downloading' || item.status === 'starting') {
@@ -381,7 +456,7 @@ async function restoreDownloads() {
   }
 }
 
-function createWindow() {
+function createWindow({ startHidden = false } = {}) {
   const window = new BrowserWindow({
     width: 1460,
     height: 920,
@@ -389,7 +464,7 @@ function createWindow() {
     minHeight: 650,
     backgroundColor: '#0b0d12',
     frame: false,
-    icon: path.join(app.getAppPath(), 'build', 'gameonix.ico'),
+    icon: getAppIconPath(),
     autoHideMenuBar: true,
     show: false,
     webPreferences: {
@@ -405,7 +480,16 @@ function createWindow() {
   }
   window.on('maximize', publishWindowState)
   window.on('unmaximize', publishWindowState)
-  window.once('ready-to-show', () => window.show())
+  window.once('ready-to-show', () => {
+    window.maximize()
+    if (!startHidden) window.show()
+  })
+  window.on('close', (event) => {
+    if (isQuitting || !appSettings.closeToTray) return
+    event.preventDefault()
+    window.hide()
+    syncTray()
+  })
   window.on('closed', () => windows.delete(window))
   window.webContents.setWindowOpenHandler(({ url }) => {
     try {
@@ -434,8 +518,25 @@ function registerDownloadIpc() {
   })
   ipcMain.handle('window:close', (event) => { requireTrustedFrame(event); BrowserWindow.fromWebContents(event.sender)?.close() })
   ipcMain.handle('window:is-maximized', (event) => { requireTrustedFrame(event); return Boolean(BrowserWindow.fromWebContents(event.sender)?.isMaximized()) })
+  ipcMain.handle('window:back', (event) => { requireTrustedFrame(event); const contents = event.sender; if (contents.canGoBack()) contents.goBack() })
+  ipcMain.handle('window:forward', (event) => { requireTrustedFrame(event); const contents = event.sender; if (contents.canGoForward()) contents.goForward() })
   ipcMain.handle('updates:get-state', (event) => { requireTrustedFrame(event); return { ...updaterState } })
   ipcMain.handle('updates:check', (event) => { requireTrustedFrame(event); return checkForUpdates() })
+
+  ipcMain.handle('settings:get', (event) => {
+    requireTrustedFrame(event)
+    return { ...appSettings, downloadDirectory, version: app.getVersion() }
+  })
+  ipcMain.handle('settings:update', async (event, patch = {}) => {
+    requireTrustedFrame(event)
+    for (const key of ['closeToTray', 'launchAtStartup', 'askBeforeDownload']) {
+      if (typeof patch[key] === 'boolean') appSettings[key] = patch[key]
+    }
+    applyStartupSetting()
+    syncTray()
+    await persistDownloads()
+    return { ...appSettings, downloadDirectory, version: app.getVersion() }
+  })
 
   ipcMain.handle('downloads:list', (event) => { requireTrustedFrame(event); return getSnapshot() })
   ipcMain.handle('downloads:get-directory', (event) => { requireTrustedFrame(event); return downloadDirectory })
@@ -494,7 +595,12 @@ function registerDownloadIpc() {
     const item = downloads.get(safeSlug(id))
     if (!item) throw new Error('Download not found.')
     const torrent = activeTorrents.get(item.id)
-    if (torrent && !torrent.destroyed) await new Promise((resolve) => torrent.destroy({ destroyStore: false }, resolve))
+    if (torrent && !torrent.destroyed) {
+      item.downloaded = Number(torrent.downloaded) || item.downloaded
+      item.total = Number(torrent.length) || item.total
+      item.progress = Number(torrent.progress) || item.progress
+      await new Promise((resolve, reject) => torrent.destroy({ destroyStore: false }, (error) => error ? reject(error) : resolve()))
+    }
     activeTorrents.delete(item.id)
     item.status = 'paused'
     item.speed = 0
@@ -558,20 +664,52 @@ async function registerAppProtocol() {
 app.whenReady().then(async () => {
   Menu.setApplicationMenu(null)
   await loadDownloadState()
+  applyStartupSetting()
+  syncTray()
   registerDownloadIpc()
   if (app.isPackaged) await registerAppProtocol()
-  createWindow()
+  const startHidden = appSettings.launchAtStartup && (process.argv.includes('--startup') || app.getLoginItemSettings?.().wasOpenedAtLogin)
+  createWindow({ startHidden })
   startUpdateMonitor()
   void restoreDownloads()
-  app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
+  app.on('activate', showMainWindow)
 })
 
-app.on('before-quit', () => {
+app.on('before-quit', (event) => {
+  isQuitting = true
   if (downloadTimer) clearInterval(downloadTimer)
-  void persistDownloads()
-  if (torrentClient && !torrentClient.destroyed) void torrentClient.destroy()
+  if (!torrentClient || torrentClient.destroyed || shutdownComplete) {
+    void persistDownloads()
+    return
+  }
+  event.preventDefault()
+  if (shutdownInProgress) return
+  shutdownInProgress = true
+  for (const [id, torrent] of activeTorrents) {
+    const item = downloads.get(id)
+    if (!item || !torrent || torrent.destroyed) continue
+    item.downloaded = Number(torrent.downloaded) || item.downloaded
+    item.total = Number(torrent.length) || item.total
+    item.progress = Number(torrent.progress) || item.progress
+    item.status = torrent.done ? 'completed' : 'downloading'
+  }
+  void persistDownloads().catch((error) => console.error('Could not save download state before closing:', error)).finally(() => {
+    try {
+      torrentClient.destroy((error) => {
+        if (error) console.error('Could not close the torrent client cleanly:', error)
+        void persistDownloads().catch((saveError) => console.error('Could not finish saving downloads:', saveError)).finally(() => {
+          shutdownComplete = true
+          app.quit()
+        })
+      })
+    } catch (error) {
+      console.error('Could not close the torrent client cleanly:', error)
+      shutdownComplete = true
+      app.quit()
+    }
+  })
 })
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit()
+  if (process.platform !== 'darwin' && !appSettings.closeToTray) app.quit()
 })

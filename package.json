@@ -42,6 +42,10 @@
     "productName": "GameOnix",
     "directories": { "output": "release" },
     "files": ["electron/**/*", "dist/**/*", "build/gameonix.ico", "package.json"],
+    "extraResources": [
+      { "from": "build/gameonix.ico", "to": "gameonix.ico" },
+      { "from": "build/gameonix-icon.png", "to": "gameonix-icon.png" }
+    ],
     "asar": true,
     "npmRebuild": false,
     "win": { "icon": "build/gameonix.ico", "target": "dir" }
