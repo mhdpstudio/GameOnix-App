@@ -1,0 +1,400 @@
+/* Add-ons panel: one downloadable package per card. */
+
+.addons-panel {
+    display: grid;
+    gap: 14px;
+    min-height: 0;
+}
+
+.addons-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px 18px;
+}
+
+.addons-head h2 {
+    margin: 0;
+    color: var(--text-primary, #f5f5f7);
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+}
+
+.addons-summary {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0;
+    color: var(--text-secondary, #a1a1aa);
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    font-variant-numeric: tabular-nums;
+}
+
+.addons-total {
+    padding-left: 10px;
+    border-left: 1px solid var(--border, #272b33);
+    color: var(--text-muted, #71717a);
+    font-weight: 500;
+}
+
+.addons-list {
+    display: grid;
+    gap: 12px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+/* Card */
+
+.addon-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 18px 24px;
+    padding: 16px;
+    border: 1px solid var(--border, #272b33);
+    border-radius: 12px;
+    background: var(--bg-secondary, #101318);
+    transition:
+        border-color 160ms ease,
+        background 160ms ease;
+}
+
+.addon-card:hover {
+    border-color: var(--border-hover, #3a3f4a);
+}
+
+.addon-card.is-single {
+    gap: 18px 30px;
+    padding: 22px;
+}
+
+.addon-card-identity {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-width: 0;
+}
+
+.addon-card.is-single .addon-card-identity {
+    gap: 20px;
+}
+
+/* Logo plate */
+
+.addon-logo {
+    display: grid;
+    flex: 0 0 auto;
+    place-items: center;
+    width: 56px;
+    height: 56px;
+    overflow: hidden;
+    border: 1px solid var(--border, #272b33);
+    border-radius: 10px;
+    background: var(--bg-tertiary, #15191f);
+}
+
+.addon-card.is-single .addon-logo {
+    width: 96px;
+    height: 96px;
+    border-radius: 12px;
+}
+
+/* The artwork itself is the tile: it fills the rounded square. */
+.addon-logo.has-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+/* Initials fallback keeps the tinted plate. */
+.addon-logo.has-initials {
+    border-color: var(--primary-border, rgba(105, 92, 254, 0.3));
+    background: var(--primary-subtle, rgba(105, 92, 254, 0.12));
+}
+
+.addon-logo-initials {
+    color: var(--primary-hover, #8d70ff);
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+}
+
+.addon-logo-initials[data-size="lg"] {
+    font-size: 20px;
+}
+
+/* Copy */
+
+.addon-card-copy {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+}
+
+.addon-card-title {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 10px;
+}
+
+.addon-card-title h3 {
+    margin: 0;
+    color: var(--text-primary, #f5f5f7);
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+
+.addon-card.is-single .addon-card-title h3 {
+    font-size: 18px;
+}
+
+/* Type badge */
+
+.addon-type {
+    --type-tone: var(--text-secondary, #a1a1aa);
+    --type-fill: rgba(255, 255, 255, 0.06);
+
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 8px 3px 7px;
+    border: 1px solid color-mix(in srgb, var(--type-tone) 34%, transparent);
+    border-radius: 6px;
+    background: var(--type-fill);
+    color: var(--type-tone);
+    font-size: 9.5px;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    line-height: 1.5;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.addon-type::before {
+    content: "";
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: currentColor;
+}
+
+.addon-type.is-crack {
+    --type-tone: var(--danger, #ef4444);
+    --type-fill: var(--danger-bg, rgba(239, 68, 68, 0.12));
+}
+
+.addon-type.is-update {
+    --type-tone: var(--info, #38bdf8);
+    --type-fill: var(--info-bg, rgba(56, 189, 248, 0.12));
+}
+
+.addon-type.is-dlc {
+    --type-tone: var(--warning, #f59e0b);
+    --type-fill: var(--warning-bg, rgba(245, 158, 11, 0.12));
+}
+
+.addon-type.is-mod {
+    --type-tone: var(--success, #22c55e);
+    --type-fill: var(--success-bg, rgba(34, 197, 94, 0.12));
+}
+
+.addon-description {
+    display: -webkit-box;
+    max-width: 68ch;
+    margin: 0;
+    overflow: hidden;
+    color: var(--text-secondary, #a1a1aa);
+    font-size: 12.5px;
+    line-height: 1.6;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+}
+
+.addon-card.is-single .addon-description {
+    font-size: 13.5px;
+}
+
+.addon-specs {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    margin: 0;
+    color: var(--text-muted, #71717a);
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
+}
+
+.addon-specs > span + span {
+    margin-left: 14px;
+    padding-left: 14px;
+    border-left: 1px solid var(--border, #272b33);
+}
+
+.addon-size {
+    color: var(--text-secondary, #a1a1aa);
+    font-weight: 600;
+}
+
+.addon-file-kind {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+/* Download action */
+
+.addon-card-action {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.addon-download {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    min-height: 44px;
+    padding: 0 18px;
+    border: 1px solid var(--primary, #695cfe);
+    border-radius: 10px;
+    background: var(--primary, #695cfe);
+    color: var(--text-on-primary, #fff);
+    font-size: 12.5px;
+    font-weight: 700;
+    text-decoration: none;
+    white-space: nowrap;
+    transition:
+        background 160ms ease,
+        border-color 160ms ease,
+        box-shadow 160ms ease;
+}
+
+.addon-card.is-single .addon-download {
+    min-height: 48px;
+    padding: 0 22px;
+    font-size: 13px;
+}
+
+.addon-download:hover {
+    border-color: var(--primary-hover, #8d70ff);
+    background: var(--primary-hover, #8d70ff);
+}
+
+.addon-download:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring, 0 0 0 3px rgba(105, 92, 254, 0.25));
+}
+
+.addon-download-icon {
+    font-size: 13px;
+}
+
+.addon-download.is-unavailable {
+    border-color: var(--border, #272b33);
+    background: transparent;
+    color: var(--text-muted, #71717a);
+    font-weight: 600;
+}
+
+/* Empty state */
+
+.addons-empty {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 20px 18px;
+    border: 1px dashed var(--border, #272b33);
+    border-radius: 12px;
+    background: var(--bg-secondary, #101318);
+}
+
+.addons-empty-icon {
+    display: grid;
+    flex: 0 0 auto;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    background: var(--primary-subtle, rgba(105, 92, 254, 0.12));
+    color: var(--primary-hover, #8d70ff);
+    font-size: 15px;
+}
+
+.addons-empty h3 {
+    margin: 0 0 3px;
+    color: var(--text-primary, #f5f5f7);
+    font-size: 13.5px;
+    font-weight: 600;
+}
+
+.addons-empty p {
+    margin: 0;
+    color: var(--text-muted, #71717a);
+    font-size: 12px;
+}
+
+/* Light theme adjustments for the neutral badge fill */
+
+:root[data-theme="light"] .addon-type {
+    --type-fill: rgba(24, 24, 27, 0.05);
+}
+
+:root[data-theme="light"] .addon-card:hover {
+    border-color: var(--border-hover, #c4c4cc);
+}
+
+@media (max-width: 720px) {
+    .addon-card,
+    .addon-card.is-single {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 14px;
+        padding: 16px;
+    }
+
+    .addon-card.is-single .addon-card-identity {
+        align-items: flex-start;
+        gap: 14px;
+    }
+
+    .addon-card.is-single .addon-logo {
+        width: 64px;
+        height: 64px;
+        border-radius: 10px;
+    }
+
+    .addon-card.is-single .addon-card-title h3 {
+        font-size: 15.5px;
+    }
+
+    .addon-card.is-single .addon-description {
+        font-size: 12.5px;
+    }
+
+    .addon-card-action {
+        justify-content: stretch;
+    }
+
+    .addon-download,
+    .addon-card.is-single .addon-download {
+        width: 100%;
+        min-height: 44px;
+        font-size: 12.5px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .addon-card,
+    .addon-download {
+        transition: none;
+    }
+}

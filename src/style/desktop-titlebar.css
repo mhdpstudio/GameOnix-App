@@ -1,0 +1,36 @@
+.desktop-titlebar {
+  position: fixed;
+  z-index: 10000;
+  inset: 0 0 auto;
+  display: flex;
+  height: 36px;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #24232b;
+  background: #111116;
+  color: #f7f4ff;
+  user-select: none;
+  -webkit-app-region: drag;
+}
+.desktop-titlebar-drag { display: flex; min-width: 0; height: 100%; align-items: center; gap: 9px; padding: 0 12px; -webkit-app-region: drag; }
+.desktop-titlebar-drag img { width: 19px; height: 19px; object-fit: contain; }
+.desktop-titlebar-drag > span { font-size: 12px; font-weight: 750; }
+.desktop-titlebar-drag small { color: #8f899d; font-size: 9px; letter-spacing: .14em; }
+.desktop-update-indicator { overflow: hidden; max-width: 320px; margin-left: 16px; color: #bda4ff !important; font-size: 10px !important; font-weight: 600 !important; text-overflow: ellipsis; white-space: nowrap; }
+.desktop-update-indicator.is-error { color: #ff9c9c !important; }
+.desktop-titlebar-controls { display: flex; height: 100%; -webkit-app-region: no-drag; }
+.desktop-titlebar-controls button { display: grid; width: 46px; height: 100%; place-items: center; border: 0; background: transparent; color: #d9d5e0; cursor: pointer; }
+.desktop-titlebar-controls button:hover { background: #292730; }
+.desktop-titlebar-controls button.is-close:hover { background: #c42b3a; color: white; }
+.desktop-titlebar-controls button span { position: relative; display: block; width: 11px; height: 11px; }
+.titlebar-minimize { height: auto !important; border-top: 1px solid currentColor; }
+.titlebar-maximize { border: 1px solid currentColor; }
+.titlebar-restore::before, .titlebar-restore::after { position: absolute; width: 8px; height: 8px; border: 1px solid currentColor; content: ""; }
+.titlebar-restore::before { top: 1px; left: 1px; }
+.titlebar-restore::after { top: 3px; left: 3px; background: #111116; }
+.titlebar-close::before, .titlebar-close::after { position: absolute; top: 5px; left: 0; width: 12px; border-top: 1px solid currentColor; content: ""; transform: rotate(45deg); }
+.titlebar-close::after { transform: rotate(-45deg); }
+.gameonix-desktop { --topbar-height: 99px; }
+.gameonix-desktop .sidebar { top: 36px; height: calc(100dvh - 36px); margin-top: 36px; }
+.gameonix-desktop .main-topbar { top: 36px; }
+@media (max-width: 650px) { .gameonix-desktop { --topbar-height: 100px; } }

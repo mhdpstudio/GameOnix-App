@@ -1,0 +1,54 @@
+name: Build and publish portable GameOnix
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Check out the app
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set release version
+        shell: pwsh
+        run: |
+          $package = Get-Content package.json | ConvertFrom-Json
+          $parts = $package.version.Split('.')
+          $version = "$($parts[0]).$($parts[1]).$env:GITHUB_RUN_NUMBER"
+          npm version $version --no-git-tag-version
+          "RELEASE_VERSION=$version" >> $env:GITHUB_ENV
+
+      - name: Build portable Windows app
+        run: npm run build
+
+      - name: Package unpacked app files
+        run: npx electron-builder --win dir
+
+      - name: Zip win-unpacked contents
+        shell: pwsh
+        run: Compress-Archive -Path 'release/win-unpacked/*' -DestinationPath 'release/GameOnix-win-unpacked.zip' -CompressionLevel Optimal
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.RELEASE_VERSION }}
+          name: GameOnix ${{ env.RELEASE_VERSION }}
+          target_commitish: ${{ github.sha }}
+          make_latest: true
+          generate_release_notes: true
+          files: release/GameOnix-win-unpacked.zip

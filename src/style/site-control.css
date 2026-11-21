@@ -1,0 +1,91 @@
+.site-control-screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  color: #f3f5fb;
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(124, 93, 255, .18), transparent 48%),
+    #0a0d16;
+}
+
+.site-control-card {
+  width: min(100%, 560px);
+  padding: clamp(28px, 6vw, 56px);
+  text-align: center;
+  border: 1px solid rgba(149, 163, 194, .2);
+  border-radius: 24px;
+  background: rgba(17, 22, 35, .88);
+  box-shadow: 0 32px 100px rgba(0, 0, 0, .38);
+}
+
+.site-control-mark {
+  width: 54px;
+  height: 54px;
+  display: grid;
+  place-items: center;
+  margin: 0 auto 26px;
+  border: 1px solid rgba(157, 132, 255, .4);
+  border-radius: 17px;
+  color: #d9ccff;
+  background: rgba(124, 93, 255, .17);
+  font-size: 25px;
+  font-weight: 800;
+}
+
+.site-control-eyebrow {
+  color: #b4a1ff;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .16em;
+}
+
+.site-control-card h1 {
+  margin: 14px 0 12px;
+  font-size: clamp(27px, 5vw, 39px);
+  line-height: 1.15;
+}
+
+.site-control-card p {
+  max-width: 420px;
+  margin: 0 auto;
+  color: #aab3c5;
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.site-control-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 28px;
+  padding: 10px 14px;
+  border: 1px solid rgba(149, 163, 194, .18);
+  border-radius: 999px;
+  color: #d4d9e5;
+  background: rgba(255, 255, 255, .035);
+  font-size: 12px;
+}
+
+.site-control-status span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #f3b45d;
+  box-shadow: 0 0 12px rgba(243, 180, 93, .65);
+}
+
+.site-control-card small {
+  display: block;
+  margin-top: 18px;
+  color: #768198;
+  font-size: 11px;
+}
+
+.site-control-screen.is-emergency .site-control-eyebrow { color: #ff9999; }
+.site-control-screen.is-emergency .site-control-mark { border-color: rgba(255, 112, 112, .38); color: #ffc3c3; background: rgba(200, 54, 68, .15); }
+.site-control-screen.is-emergency .site-control-status span { background: #ff7777; box-shadow: 0 0 12px rgba(255, 119, 119, .65); }
+.site-control-screen.is-upgrade .site-control-eyebrow { color: #86d9dc; }
+.site-control-screen.is-upgrade .site-control-mark { border-color: rgba(91, 205, 208, .35); color: #a6eff0; background: rgba(45, 167, 171, .13); }
+
+.site-control-screen.is-checking { padding: 0; background: #0a0d16; }

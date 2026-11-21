@@ -1,0 +1,1965 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import {
+  faBolt,
+  faFire,
+  faMagnifyingGlass,
+  faArrowRight,
+  faChevronLeft,
+  faChevronRight,
+  faXmark,
+  faGamepad,
+  faCreditCard,
+  faTags,
+  faLayerGroup,
+  faRotate,
+  faLock,
+  faGift,
+  faCheck,
+  faShieldHalved,
+  faWallet,
+} from "@fortawesome/free-solid-svg-icons";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { faPlaystation, faWindows, faXbox } from "@fortawesome/free-brands-svg-icons";
+import { HomeFeaturedHero } from "./home";
+import EmailSuggestion from "../components/EmailSuggestion";
+import { recordGameActivity } from "../api/follows";
+import { useAuth } from "../context/AuthContext";
+import { useEmailTypoGuard } from "../hooks/useEmailTypoGuard";
+import { isValidEmail } from "../utils/email";
+import "./../style/game-cards.css";
+
+const DATA_URL =
+  "https://raw.githubusercontent.com/mhdpstudio/GameOnix-Data-Content/main/recharge.json";
+
+const PAYMENTS_URL =
+  "https://raw.githubusercontent.com/mhdpstudio/GameOnix-Data-Content/main/payments.json";
+
+const AUTH_API_URL = "https://gameonix-backend.vercel.app/api/auth/me";
+const WALLET_API_URL =
+  "https://gameonixfav.vercel.app/api/auth/wallet";
+const WALLET_PURCHASE_API_URL =
+  "https://gameonixfav.vercel.app/api/auth/wallet-purchase";
+const WALLET_PAYMENT_ID = "__gameonix_wallet__";
+
+const RAW_ASSET_BASE =
+  "https://raw.githubusercontent.com/mhdpstudio/GameOnix-Data-Content/main/";
+
+const DEFAULT_AVATAR =
+  "https://raw.githubusercontent.com/mhdpstudio/GameOnix-Data-All/main/0.png";
+
+function getImageUrl(path) {
+  if (!path) return "";
+
+  if (/^https?:\/\//i.test(path)) {
+    return path;
+  }
+
+  const cleanPath = String(path)
+    .replace(/^(\.\.\/)+/, "")
+    .replace(/^\/+/, "");
+
+  return RAW_ASSET_BASE + cleanPath;
+}
+
+function getGameIconUrl(product) {
+  const imageUrl = getImageUrl(product?.image);
+
+  if (!imageUrl) return "";
+
+  // إزالة اسم الملف والامتداد، ثم إضافة -icon.webp
+  return imageUrl.replace(/[^/]+$/, (filename) =>
+    filename.replace(/\.[^.]+$/, "").replace(/-icon$/, "") + "-icon.webp"
+  );
+}
+
+function formatPrice(value) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return "—";
+
+  return `EGP ${amount.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+function getStartingPrice(product) {
+  const prices = (product?.packs || [])
+    .filter((pack) => pack?.able !== false)
+    .map((pack) => Number(pack?.price))
+    .filter((price) => Number.isFinite(price) && price >= 0);
+
+  return prices.length ? Math.min(...prices) : null;
+}
+
+function getDigitalPlatformLabel(product) {
+  const platform = String(product?.platform || "").trim().toLowerCase();
+  if (platform === "playstation") {
+    const version = String(product?.platformVersion || "ps5").trim().toUpperCase();
+    return version.startsWith("PS") ? version : `PS ${version}`;
+  }
+  if (platform === "pc") return "PC";
+  if (platform === "xbox") return "XBOX";
+  if (platform === "nintendo-switch") return "NINTENDO SWITCH";
+  return platform === "other" ? "OTHER PLATFORM" : "DIGITAL CODE";
+}
+
+function DigitalPlatformIcon({ product }) {
+  const platform = String(product?.platform || "").trim().toLowerCase();
+  if (platform === "playstation") return <FontAwesomeIcon icon={faPlaystation} />;
+  if (platform === "xbox") return <FontAwesomeIcon icon={faXbox} />;
+  if (platform === "pc") return <FontAwesomeIcon icon={faWindows} />;
+  if (platform === "nintendo-switch") return <FontAwesomeIcon icon={faGamepad} />;
+  return <FontAwesomeIcon icon={faGamepad} />;
+}
+
+function DigitalPlatformIconList({ product, variants }) {
+  const platforms = variants?.length ? variants : [product];
+  return <span className="gc-digital-platform-icons" role="img" aria-label={platforms.map(getDigitalPlatformLabel).join(" and ")}>
+    {platforms.map((variant, index) => <span className="gc-digital-platform-icon-item" key={variant.id || `${variant.platform}-${index}`}>
+      {index > 0 && <i aria-hidden="true">|</i>}
+      <DigitalPlatformIcon product={variant} />
+    </span>)}
+  </span>;
+}
+
+function isPackInStock(pack) {
+  return pack?.stock !== false;
+}
+
+function getProductKind(product) {
+  const kind = String(product?.kind || "").trim().toLowerCase();
+  if (kind === "game" || kind === "gift-card" || kind === "digital-code") return kind;
+
+  return String(product?.type || "").trim().toLowerCase() === "gift cards"
+    ? "gift-card"
+    : "game";
+}
+
+function ProductImage({ src, alt, className = "" }) {
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [src]);
+
+  return (
+    <div className={`gc-image-wrap ${className}`}>
+      {src && !failed ? (
+        <img
+          src={src}
+          alt={alt || ""}
+          loading="lazy"
+          onError={() => setFailed(true)}
+        />
+      ) : (
+        <div className="gc-image-fallback">
+          <FontAwesomeIcon icon={faGamepad} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// أيقونة اللعبة داخل البوب أب فقط.
+// أيقونة اللعبة داخل البوب أب فقط، باستخدام رابط -icon.webp
+function PopupGameIcon({ product, className = "" }) {
+  const [failed, setFailed] = useState(false);
+
+  const src = getImageUrl(product?.image).replace(/\.webp(\?.*)?$/i, "-icon.webp$1");
+
+  useEffect(() => {
+    setFailed(false);
+  }, [src]);
+
+  if (!src || failed) {
+    return (
+      <div
+        className={`gc-game-icon-fallback ${className}`}
+        aria-hidden="true"
+      >
+        <FontAwesomeIcon icon={faGamepad} />
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={src}
+      alt={product?.name || ""}
+      className={`gc-game-icon ${className}`}
+      loading="lazy"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+function CheckoutUserAvatar({ user }) {
+  const [failedSrc, setFailedSrc] = useState("");
+  const avatar = user?.avatar || DEFAULT_AVATAR;
+  const src = failedSrc === avatar ? DEFAULT_AVATAR : avatar;
+
+  return (
+    <img
+      className="gc-contact-avatar"
+      src={src}
+      alt=""
+      onError={() => setFailedSrc(avatar)}
+    />
+  );
+}
+
+function PaymentMethodLogo({ method }) {
+  const [failed, setFailed] = useState(false);
+
+  if (failed) {
+    return (
+      <span className="gc-payment-logo-fallback" aria-hidden="true">
+        {method.name.slice(0, 2).toUpperCase()}
+      </span>
+    );
+  }
+
+  return (
+    <img
+      className="gc-payment-logo-image"
+      src={getImageUrl(method.logo)}
+      alt=""
+      loading="lazy"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+function GameCards() {
+  const { user, authLoading } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { getSuggestion, getLiveSuggestion, keepTypedEmail } =
+    useEmailTypoGuard();
+  const [catalog, setCatalog] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [paymentMethods, setPaymentMethods] = useState([]);
+  const [paymentsLoading, setPaymentsLoading] = useState(true);
+  const [paymentsError, setPaymentsError] = useState("");
+  const [search, setSearch] = useState("");
+  const [activeCategory, setActiveCategory] = useState("All");
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [selectedDigitalVariants, setSelectedDigitalVariants] = useState({});
+  const [selectedPack, setSelectedPack] = useState(null);
+  const [quantity, setQuantity] = useState(1);
+  const [selectedPayment, setSelectedPayment] = useState("");
+  const [popularOnly, setPopularOnly] = useState(false);
+  const [sortBy, setSortBy] = useState("featured");
+  const [playerId, setPlayerId] = useState("");
+  const [serverId, setServerId] = useState("");
+  const [email, setEmail] = useState("");
+  const [phoneNumber, setPhoneNumber] = useState("");
+  const [whatsappNumber, setWhatsappNumber] = useState("");
+  const [isGift, setIsGift] = useState(false);
+  const [recipient, setRecipient] = useState("");
+  const [checkoutMessage, setCheckoutMessage] = useState("");
+  const [checkoutSubmitting, setCheckoutSubmitting] = useState(false);
+  const [checkoutOrderSubmitted, setCheckoutOrderSubmitted] = useState(false);
+  const [checkoutToast, setCheckoutToast] = useState("");
+  const [walletBalance, setWalletBalance] = useState(null);
+  const [walletBalanceLoading, setWalletBalanceLoading] = useState(false);
+  const [walletBalanceError, setWalletBalanceError] = useState("");
+  const [popularCarouselPaused, setPopularCarouselPaused] = useState(false);
+  const [popularCarouselElement, setPopularCarouselElement] = useState(null);
+  const checkoutRightRef = useRef(null);
+  const checkoutSubmitLockRef = useRef(false);
+  const popularDirectionRef = useRef(1);
+  const popularResumeTimerRef = useRef(null);
+  const popularInteractionRef = useRef({ pointer: false, focus: false });
+
+  const walletPaymentMethod = {
+    id: WALLET_PAYMENT_ID,
+    name: "Wallet",
+    av: walletBalance !== null && !walletBalanceLoading,
+    isWallet: true,
+  };
+
+  const selectedPaymentMethod =
+    selectedPayment === WALLET_PAYMENT_ID
+      ? walletPaymentMethod
+      : paymentMethods.find((method) => method.name === selectedPayment);
+  const isDigitalCodeProduct = String(selectedProduct?.kind || "").trim().toLowerCase() === "digital-code";
+  const isGiftCardProduct = isDigitalCodeProduct || ["gift card", "gift cards"].includes(
+    String(selectedProduct?.type || "").trim().toLowerCase()
+  );
+  const canSendGift = selectedProduct?.gift === true;
+  const isGiftOrder = canSendGift && isGift;
+  const giftEmailSuggestion = isGiftOrder
+    ? getLiveSuggestion("gift-email", email)
+    : null;
+  const selectedProductVariants = useMemo(() => {
+    if (!isDigitalCodeProduct || !selectedProduct?.digitalCodeGroup) return selectedProduct ? [selectedProduct] : [];
+    const group = String(selectedProduct.digitalCodeGroup).trim().toLowerCase();
+    return catalog.filter((product) =>
+      getProductKind(product) === "digital-code" &&
+      String(product.digitalCodeGroup || "").trim().toLowerCase() === group
+    );
+  }, [catalog, isDigitalCodeProduct, selectedProduct]);
+
+  async function loadCatalog() {
+    setLoading(true);
+    setError("");
+
+    try {
+      const response = await fetch(DATA_URL, { cache: "no-cache" });
+
+      if (!response.ok) {
+        throw new Error(`Catalog request failed (${response.status})`);
+      }
+
+      const data = await response.json();
+
+      if (!Array.isArray(data)) {
+        throw new Error("Unexpected catalog format.");
+      }
+
+      setCatalog(data);
+    } catch (err) {
+      console.error("GameOnix catalog error:", err);
+      setError("تعذر تحميل المنتجات. اتأكد من الاتصال بالإنترنت وحاول تاني.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function loadPaymentMethods() {
+    setPaymentsLoading(true);
+    setPaymentsError("");
+
+    try {
+      const response = await fetch(PAYMENTS_URL, { cache: "no-cache" });
+
+      if (!response.ok) {
+        throw new Error(`Payment methods request failed (${response.status})`);
+      }
+
+      const data = await response.json();
+
+      if (
+        !Array.isArray(data) ||
+        data.some(
+          (method) =>
+            !method ||
+            typeof method.name !== "string" ||
+            !method.name.trim() ||
+            typeof method.logo !== "string" ||
+            !method.logo.trim() ||
+            typeof method.av !== "boolean" ||
+            typeof method["mobile-number"] !== "boolean"
+        )
+      ) {
+        throw new Error("Unexpected payment methods format.");
+      }
+
+      setPaymentMethods(data);
+      setSelectedPayment(data.find((method) => method.av)?.name || "");
+    } catch (err) {
+      console.error("GameOnix payment methods error:", err);
+      setPaymentsError("تعذر تحميل طرق الدفع. حاول تاني.");
+    } finally {
+      setPaymentsLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadCatalog();
+    loadPaymentMethods();
+  }, []);
+
+  useEffect(() => {
+    const query = new URLSearchParams(location.search);
+    const featuredProductId = query.get("featuredProduct");
+    const productId = featuredProductId || query.get("digitalCode");
+    const packIndexValue = query.get("packIndex");
+    const requestedPackIndex = packIndexValue && /^\d+$/.test(packIndexValue)
+      ? Number(packIndexValue)
+      : null;
+    if (!productId || !catalog.length) return;
+
+    const product = catalog.find((item) =>
+      String(item.id) === productId &&
+      item?.able !== false &&
+      (featuredProductId || getProductKind(item) === "digital-code")
+    );
+    if (!product) return;
+
+    setActiveCategory("All");
+    setSearch("");
+    document.getElementById("gc-store")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    void openProduct(product, Number.isInteger(requestedPackIndex) ? requestedPackIndex : null);
+    navigate(`${location.pathname}#gc-digital-codes`, { replace: true });
+  }, [catalog, location.pathname, location.search, navigate]);
+
+  useEffect(() => {
+    void recordGameActivity("shopping", "shopping-view").catch(() => {});
+  }, []);
+
+  const categories = useMemo(() => {
+    const types = [
+      ...new Set(
+        catalog
+          .filter((item) => item?.able !== false)
+          .map((item) => item.type)
+          .filter(Boolean)
+      ),
+    ];
+
+    return [
+      { id: "All", label: "All Products", icon: faLayerGroup },
+      ...types.map((type) => ({
+        id: type,
+        label: type,
+        icon: type.trim().toLowerCase() === "gift card" ? faCreditCard : faGamepad,
+      })),
+    ];
+  }, [catalog]);
+
+  const filteredCatalog = useMemo(() => {
+    let products = catalog.filter((item) => item?.able !== false);
+
+    if (activeCategory !== "All") {
+      products = products.filter((item) => item.type === activeCategory);
+    }
+
+    const query = search.trim().toLowerCase();
+
+    if (query) {
+      products = products.filter((item) => {
+        const name = String(item.name || "").toLowerCase();
+        const id = String(item.id || "").toLowerCase();
+
+        const packs = (item.packs || [])
+          .filter((pack) => pack?.able !== false)
+          .map((pack) => `${pack.title || ""} ${pack.type || ""}`)
+          .join(" ")
+          .toLowerCase();
+
+        return (
+          name.includes(query) ||
+          id.includes(query) ||
+          packs.includes(query)
+        );
+      });
+    }
+
+    if (popularOnly) {
+      products = products.filter((item) =>
+        (item.packs || []).some(
+          (pack) => pack?.able !== false && pack.popular
+        )
+      );
+    }
+
+    if (sortBy === "name") {
+      products.sort((a, b) =>
+        String(a.name).localeCompare(String(b.name))
+      );
+    }
+
+    return products;
+  }, [catalog, activeCategory, search, popularOnly, sortBy]);
+
+  const popularShortcuts = useMemo(
+    () =>
+      filteredCatalog
+        .map((product, index) => ({
+          product,
+          index,
+          popularPackCount: (product.packs || []).filter(
+            (pack) => pack?.able !== false && pack.popular === true
+          ).length,
+        }))
+        .filter(({ popularPackCount }) => popularPackCount > 0)
+        .sort(
+          (a, b) =>
+            b.popularPackCount - a.popularPackCount || a.index - b.index
+        )
+        .slice(0, 8),
+    [filteredCatalog]
+  );
+  const gameProducts = filteredCatalog.filter(
+    (product) => getProductKind(product) === "game"
+  );
+  const digitalCodeProducts = filteredCatalog.filter(
+    (product) => getProductKind(product) === "digital-code"
+  );
+  const groupedDigitalCodeProducts = useMemo(() => {
+    const groups = new Map();
+    for (const product of digitalCodeProducts) {
+      const explicitGroup = String(product.digitalCodeGroup || "").trim().toLowerCase();
+      const key = explicitGroup || String(product.id);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(product);
+    }
+    return [...groups].map(([key, variants]) => ({ key, variants }));
+  }, [digitalCodeProducts]);
+  const digitalCodeCards = useMemo(() => groupedDigitalCodeProducts.map(({ key, variants }) => {
+    const selectedId = selectedDigitalVariants[key];
+    const product = variants.find((variant) => String(variant.id) === String(selectedId)) || variants[0];
+    return { ...product, digitalCodeVariants: variants, digitalCodeGroupKey: key };
+  }), [groupedDigitalCodeProducts, selectedDigitalVariants]);
+  const giftCardProducts = filteredCatalog.filter(
+    (product) => getProductKind(product) === "gift-card"
+  );
+
+  useEffect(() => {
+    const carousel = popularCarouselElement;
+    if (
+      !carousel ||
+      popularCarouselPaused ||
+      popularShortcuts.length < 2
+    ) {
+      return;
+    }
+    let intervalId;
+    let startTimer;
+    let edgeDelayTimer;
+
+    const start = () => {
+      intervalId = window.setInterval(() => {
+        if (document.hidden) return;
+
+        const maxScroll = carousel.scrollWidth - carousel.clientWidth;
+        if (maxScroll <= 1) return;
+
+        const nextScroll =
+          carousel.scrollLeft + popularDirectionRef.current;
+        if (nextScroll >= maxScroll) {
+          carousel.scrollLeft = maxScroll;
+          popularDirectionRef.current = -1;
+          window.clearInterval(intervalId);
+          edgeDelayTimer = window.setTimeout(start, 1400);
+          return;
+        }
+
+        if (nextScroll <= 0) {
+          carousel.scrollLeft = 0;
+          popularDirectionRef.current = 1;
+          window.clearInterval(intervalId);
+          edgeDelayTimer = window.setTimeout(start, 1400);
+          return;
+        }
+
+        carousel.scrollLeft = nextScroll;
+      }, 30);
+    };
+
+    startTimer = window.setTimeout(start, 900);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.clearTimeout(startTimer);
+      window.clearTimeout(edgeDelayTimer);
+    };
+  }, [popularCarouselElement, popularCarouselPaused, popularShortcuts.length]);
+
+  function scrollPopularCarousel(direction) {
+    const carousel = popularCarouselElement;
+    if (!carousel) return;
+
+    carousel.scrollBy({
+      left: direction * carousel.clientWidth * 0.8,
+      behavior: "smooth",
+    });
+  }
+
+  function pausePopularCarousel() {
+    setPopularCarouselPaused(true);
+    if (popularResumeTimerRef.current !== null) {
+      window.clearTimeout(popularResumeTimerRef.current);
+      popularResumeTimerRef.current = null;
+    }
+  }
+
+  function schedulePopularCarouselResume() {
+    if (popularResumeTimerRef.current !== null) {
+      window.clearTimeout(popularResumeTimerRef.current);
+    }
+
+    popularResumeTimerRef.current = window.setTimeout(() => {
+      if (
+        !popularInteractionRef.current.pointer &&
+        !popularInteractionRef.current.focus
+      ) {
+        setPopularCarouselPaused(false);
+      }
+      popularResumeTimerRef.current = null;
+    }, 1200);
+  }
+
+  const visibleCatalog = catalog.filter((product) => product?.able !== false);
+  const totalPacks = visibleCatalog.reduce(
+    (total, product) =>
+      total +
+      (product.packs || []).filter((pack) => pack?.able !== false).length,
+    0
+  );
+  const popularProductCount = visibleCatalog.filter((product) =>
+    (product.packs || []).some(
+      (pack) => pack?.able !== false && pack.popular
+    )
+  ).length;
+
+  async function openProduct(product, initialPackIndex = null) {
+    const packs = (product.packs || []).filter(
+      (pack) => pack?.able !== false
+    );
+    if (packs.length > 0 && packs.every((pack) => !isPackInStock(pack))) {
+      return;
+    }
+
+    setSelectedProduct(product);
+    const initialPack = Number.isInteger(initialPackIndex)
+      ? (product.packs || [])[initialPackIndex]
+      : null;
+    setSelectedPack(
+      initialPack && packs.includes(initialPack) && isPackInStock(initialPack)
+        ? initialPack
+        : null
+    );
+    setQuantity(1);
+    setSelectedPayment(paymentMethods.find((method) => method.av)?.name || "");
+    setPlayerId("");
+    setServerId("");
+    setEmail("");
+    setPhoneNumber("");
+    setWhatsappNumber("");
+    setRecipient("");
+    setIsGift(false);
+    setCheckoutMessage("");
+    setCheckoutSubmitting(false);
+    setCheckoutOrderSubmitted(false);
+    setWalletBalance(null);
+    setWalletBalanceError("");
+
+    if (!user) return;
+
+    setWalletBalanceLoading(true);
+    try {
+      const tokenResponse = await fetch(`${AUTH_API_URL}?token=true`, {
+        method: "GET",
+        headers: { Accept: "application/json" },
+        credentials: "include",
+      });
+      const tokenData = await tokenResponse.json().catch(() => ({}));
+
+      if (!tokenResponse.ok || typeof tokenData.token !== "string") {
+        throw new Error(tokenData.error || "Sign in to load your wallet.");
+      }
+
+      const response = await fetch(WALLET_API_URL, {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+          Authorization: `Bearer ${tokenData.token}`,
+        },
+        credentials: "omit",
+      });
+      const walletData = await response.json().catch(() => ({}));
+
+      if (
+        !response.ok ||
+        !Number.isFinite(walletData.balance) ||
+        walletData.balance < 0
+      ) {
+        throw new Error(walletData.error || "Unable to load wallet balance.");
+      }
+
+      setWalletBalance(walletData.balance);
+    } catch (walletError) {
+      console.error("Checkout wallet balance load failed:", walletError);
+      setWalletBalanceError(walletError.message);
+    } finally {
+      setWalletBalanceLoading(false);
+    }
+  }
+
+  function closeProduct() {
+    setSelectedProduct(null);
+    setSelectedPack(null);
+    setCheckoutMessage("");
+  }
+
+  useEffect(() => {
+    if (!checkoutToast) return undefined;
+    const timeout = window.setTimeout(() => setCheckoutToast(""), 5000);
+    return () => window.clearTimeout(timeout);
+  }, [checkoutToast]);
+
+  useEffect(() => {
+    if (!selectedProduct) return undefined;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    function handleKeyDown(event) {
+      if (event.key === "Escape") closeProduct();
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [selectedProduct]);
+
+  useEffect(() => {
+    if (selectedProduct && checkoutRightRef.current) {
+      checkoutRightRef.current.scrollTop = 0;
+    }
+  }, [selectedProduct?.id]);
+
+  const subtotal = selectedPack
+    ? Number(selectedPack.price) * quantity
+    : 0;
+
+  const total = subtotal;
+
+  function choosePack(pack) {
+    if (!isPackInStock(pack)) return;
+
+    setSelectedPack(pack);
+    setQuantity(1);
+    setCheckoutMessage("");
+    setCheckoutOrderSubmitted(false);
+  }
+
+  async function handleCheckout(event) {
+    event.preventDefault();
+    if (checkoutSubmitLockRef.current || checkoutSubmitting) return;
+    setCheckoutMessage("");
+
+    if (authLoading || !user) {
+      setCheckoutMessage("Sign in before continuing with your order.");
+      return;
+    }
+
+    if (!selectedPack) {
+      setCheckoutMessage("اختار الباقة الأول.");
+      return;
+    }
+
+    if (!isGiftCardProduct && isGiftOrder && !recipient.trim()) {
+      setCheckoutMessage("اكتب بيانات المستلم عشان تكمل.");
+      return;
+    }
+
+    if (isGiftCardProduct && isGiftOrder && !email.trim()) {
+      setCheckoutMessage("Enter the recipient's email to send the gift card codes.");
+      return;
+    }
+
+    if (isGiftOrder && email.trim()) {
+      const suggestion = getSuggestion("gift-email", email);
+
+      if (suggestion) {
+        setEmail(suggestion);
+        setCheckoutMessage(
+          `Did you mean ${suggestion}? We corrected the recipient email. Check it and continue again.`
+        );
+        return;
+      }
+
+      if (!isValidEmail(email)) {
+        setCheckoutMessage(
+          "Enter a valid recipient email for the gift card codes."
+        );
+        return;
+      }
+    }
+
+    if (!isGiftCardProduct && !isGiftOrder && !playerId.trim()) {
+      setCheckoutMessage("اكتب Player ID عشان تكمل.");
+      return;
+    }
+
+    if (!selectedPayment) {
+      setCheckoutMessage("اختار وسيلة الدفع.");
+      return;
+    }
+
+    if (!selectedPaymentMethod?.av) {
+      setCheckoutMessage("وسيلة الدفع المختارة غير متاحة حاليًا.");
+      return;
+    }
+
+    if (!/^[+\d][\d\s()-]{5,28}$/.test(whatsappNumber.trim())) {
+      setCheckoutMessage("اكتب رقم واتساب صحيحًا عشان نقدر نتواصل معاك.");
+      return;
+    }
+
+    if (
+      !selectedPaymentMethod?.isWallet &&
+      selectedPaymentMethod?.["mobile-number"] &&
+      !phoneNumber.trim()
+    ) {
+      setCheckoutMessage("اكتب رقم الموبايل المطلوب لطريقة الدفع.");
+      return;
+    }
+
+    checkoutSubmitLockRef.current = true;
+    setCheckoutSubmitting(true);
+    try {
+      const tokenResponse = await fetch(`${AUTH_API_URL}?token=true`, {
+        method: "GET",
+        headers: { Accept: "application/json" },
+        credentials: "include",
+      });
+      const tokenData = await tokenResponse.json().catch(() => ({}));
+      if (!tokenResponse.ok || typeof tokenData.token !== "string") {
+        throw new Error(tokenData.error || "Sign in again to place your order.");
+      }
+
+      const response = await fetch(WALLET_PURCHASE_API_URL, {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${tokenData.token}`,
+          },
+          credentials: "omit",
+          body: JSON.stringify({
+            productId: String(selectedProduct.id),
+            packIndex: (selectedProduct.packs || []).indexOf(selectedPack),
+            quantity,
+            paymentMethod: selectedPaymentMethod.name,
+            mobileNumber: phoneNumber.trim(),
+            whatsappNumber: whatsappNumber.trim(),
+            playerId: playerId.trim(),
+            serverId: serverId.trim(),
+            contactEmail: isGiftOrder ? email.trim() : "",
+            isGift: isGiftOrder,
+            recipient: recipient.trim(),
+          }),
+        });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.success !== true) {
+        throw new Error(data.error || "Unable to submit your purchase request.");
+      }
+
+      setCheckoutOrderSubmitted(true);
+      setCheckoutToast(
+        `Order request ${data.request.id.slice(0, 8)} was sent for review.${data.adminEmailSent ? "" : " The request was saved, but admin email delivery failed; please contact support."}`
+      );
+      closeProduct();
+      window.dispatchEvent(new Event("wallet-notifications-updated"));
+    } catch (purchaseError) {
+      console.error("Game purchase request failed:", purchaseError);
+      setCheckoutMessage(
+        purchaseError.message || "Unable to submit your purchase request."
+      );
+    } finally {
+      checkoutSubmitLockRef.current = false;
+      setCheckoutSubmitting(false);
+    }
+  }
+
+  return (
+    <main className="game-cards-page">
+      <div className="gc-container">
+        <header className="gc-topbar">
+          <div className="gc-breadcrumb">
+            <span>GameOnix</span>
+            <FontAwesomeIcon icon={faArrowRight} />
+            <span className="current">Shopping</span>
+          </div>
+
+          <div className="gc-live-status">
+            <span className="gc-status-dot" />
+            Digital Store
+          </div>
+        </header>
+
+        <HomeFeaturedHero showFallback={false} />
+
+        <section className="gc-stats">
+          <div className="gc-stat">
+            <span className="gc-stat-icon">
+              <FontAwesomeIcon icon={faGamepad} />
+            </span>
+            <div>
+              <strong>{loading ? "—" : visibleCatalog.length}</strong>
+              <span>Products</span>
+            </div>
+          </div>
+
+          <div className="gc-stat">
+            <span className="gc-stat-icon">
+              <FontAwesomeIcon icon={faTags} />
+            </span>
+            <div>
+              <strong>{loading ? "—" : totalPacks}</strong>
+              <span>Available packs</span>
+            </div>
+          </div>
+
+          <div className="gc-stat">
+            <span className="gc-stat-icon">
+              <FontAwesomeIcon icon={faFire} />
+            </span>
+            <div>
+              <strong>
+                {loading ? "—" : popularProductCount}
+              </strong>
+              <span>Popular picks</span>
+            </div>
+          </div>
+        </section>
+
+        <section className="gc-store" id="gc-store">
+          <div className="gc-section-heading">
+            <div>
+              <span className="gc-section-kicker">FIND YOUR NEXT PICK</span>
+              <h2>Explore the store</h2>
+              <p>Choose a product to open its pack selector and order popup.</p>
+            </div>
+
+            <button
+              type="button"
+              className="gc-refresh-button"
+              onClick={loadCatalog}
+              disabled={loading}
+              aria-label="Refresh catalog"
+              title="Refresh catalog"
+            >
+              <FontAwesomeIcon
+                icon={faRotate}
+                className={loading ? "gc-spinning" : ""}
+              />
+            </button>
+          </div>
+
+          <div className="gc-toolbar">
+            <label className="gc-search">
+              <FontAwesomeIcon icon={faMagnifyingGlass} />
+
+              <input
+                type="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search games, cards or packs..."
+                aria-label="Search products"
+              />
+
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch("")}
+                  aria-label="Clear search"
+                >
+                  <FontAwesomeIcon icon={faXmark} />
+                </button>
+              )}
+            </label>
+
+            <label className="gc-sort">
+              <span>Sort by</span>
+              <select
+                value={sortBy}
+                onChange={(event) => setSortBy(event.target.value)}
+              >
+                <option value="featured">Featured</option>
+                <option value="name">Name: A–Z</option>
+              </select>
+            </label>
+          </div>
+
+          <div className="gc-category-tabs">
+            {categories.map((category) => (
+              <button
+                type="button"
+                key={category.id}
+                className={
+                  activeCategory === category.id
+                    ? "gc-category-tab active"
+                    : "gc-category-tab"
+                }
+                onClick={() => setActiveCategory(category.id)}
+              >
+                <FontAwesomeIcon icon={category.icon} />
+                {category.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="gc-filter-row">
+            <span className="gc-result-count">
+              {loading
+                ? "Loading products..."
+                : `${filteredCatalog.length} results`}
+            </span>
+
+            <button
+              type="button"
+              className={`gc-popular-filter${popularOnly ? " active" : ""}`}
+              onClick={() => setPopularOnly((value) => !value)}
+              aria-pressed={popularOnly}
+            >
+              <FontAwesomeIcon icon={faFire} /> Popular packs
+            </button>
+          </div>
+
+          {loading ? (
+            <div className="gc-product-grid">
+              {Array.from({ length: 6 }).map((_, index) => (
+                <div className="gc-skeleton" key={index}>
+                  <div className="gc-skeleton-image" />
+                  <div className="gc-skeleton-line" />
+                  <div className="gc-skeleton-line short" />
+                </div>
+              ))}
+            </div>
+          ) : error ? (
+            <div className="gc-state-card">
+              <div className="gc-state-icon">
+                <FontAwesomeIcon icon={faRotate} />
+              </div>
+              <h3>Store unavailable</h3>
+              <p>{error}</p>
+              <button
+                type="button"
+                className="gc-hero-button"
+                onClick={loadCatalog}
+              >
+                Try again <FontAwesomeIcon icon={faRotate} />
+              </button>
+            </div>
+          ) : filteredCatalog.length === 0 ? (
+            <div className="gc-state-card">
+              <div className="gc-state-icon">
+                <FontAwesomeIcon icon={faMagnifyingGlass} />
+              </div>
+              <h3>No products found</h3>
+              <p>Try another search or category.</p>
+
+              <button
+                type="button"
+                className="gc-reset-button"
+                onClick={() => {
+                  setSearch("");
+                  setActiveCategory("All");
+                  setPopularOnly(false);
+                }}
+              >
+                Clear filters
+              </button>
+            </div>
+          ) : (
+            <>
+              {popularShortcuts.length > 0 && (
+                <section
+                  className="gc-popular-shortcuts"
+                  aria-labelledby="gc-popular-shortcuts-title"
+                  onPointerDown={() => {
+                    popularInteractionRef.current.pointer = true;
+                    pausePopularCarousel();
+                  }}
+                  onPointerUp={() => {
+                    popularInteractionRef.current.pointer = false;
+                    schedulePopularCarouselResume();
+                  }}
+                  onPointerCancel={() => {
+                    popularInteractionRef.current.pointer = false;
+                    schedulePopularCarouselResume();
+                  }}
+                  onWheel={() => {
+                    pausePopularCarousel();
+                    schedulePopularCarouselResume();
+                  }}
+                  onFocusCapture={() => {
+                    popularInteractionRef.current.focus = true;
+                    pausePopularCarousel();
+                  }}
+                  onBlurCapture={(event) => {
+                    if (!event.currentTarget.contains(event.relatedTarget)) {
+                      popularInteractionRef.current.focus = false;
+                      schedulePopularCarouselResume();
+                    }
+                  }}
+                >
+                  <div className="gc-catalog-section-heading">
+                    <div>
+                      <span className="gc-section-kicker">TRENDING NOW</span>
+                      <h3 id="gc-popular-shortcuts-title">Popular picks</h3>
+                    </div>
+                    <div className="gc-carousel-controls">
+                      <span className="gc-shortcut-limit">
+                        Top {popularShortcuts.length}
+                      </span>
+                      <button
+                        type="button"
+                        className="gc-carousel-arrow"
+                        onClick={() => {
+                          pausePopularCarousel();
+                          scrollPopularCarousel(-1);
+                        }}
+                        aria-label="Scroll popular picks left"
+                      >
+                        <FontAwesomeIcon icon={faChevronLeft} />
+                      </button>
+                      <button
+                        type="button"
+                        className="gc-carousel-arrow"
+                        onClick={() => {
+                          pausePopularCarousel();
+                          scrollPopularCarousel(1);
+                        }}
+                        aria-label="Scroll popular picks right"
+                      >
+                        <FontAwesomeIcon icon={faChevronRight} />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div
+                    className="gc-popular-carousel"
+                    ref={setPopularCarouselElement}
+                  >
+                    <div className="gc-popular-track">
+                      {popularShortcuts.map(({ product, popularPackCount }) => {
+                        const packs = (product.packs || []).filter(
+                          (pack) => pack?.able !== false
+                        );
+                        const inStockPacks = packs.filter(isPackInStock);
+                        const isOutOfStock =
+                          packs.length > 0 && inStockPacks.length === 0;
+
+                        return (
+                          <article
+                            className={`gc-product-card gc-popular-card${getProductKind(product) === "digital-code" ? " gc-digital-code-card" : ""}${isOutOfStock ? " out-of-stock" : ""}`}
+                            key={product.id}
+                            onPointerEnter={() => {
+                              popularInteractionRef.current.pointer = true;
+                              pausePopularCarousel();
+                            }}
+                            onPointerLeave={() => {
+                              popularInteractionRef.current.pointer = false;
+                              schedulePopularCarouselResume();
+                            }}
+                          >
+                            <button
+                              type="button"
+                              className="gc-product-click"
+                              onClick={() => openProduct(product)}
+                              disabled={isOutOfStock}
+                              aria-label={
+                                isOutOfStock
+                                  ? `${product.name} - Out of stock`
+                                  : `Choose ${product.name}`
+                              }
+                            >
+                              <div className="gc-product-image">
+                                {getProductKind(product) === "digital-code"
+                                  ? <img className="gc-digital-poster" src={getImageUrl(product.image)} alt={product.name} loading="lazy" />
+                                  : <ProductImage src={getImageUrl(product.image)} alt={product.name} />}
+                                {getProductKind(product) === "digital-code" && (
+                                  <div className="gc-digital-code-overlay">
+                                    <div className="gc-digital-code-overlay-meta">
+                                      <strong>{product.publisher || "Digital game"}</strong>
+                                      <DigitalPlatformIconList product={product} variants={product.digitalCodeVariants} />
+                                    </div>
+                                    <span>{getStartingPrice(product) === null ? "Price unavailable" : formatPrice(getStartingPrice(product))}</span>
+                                    <small>{product.name}</small>
+                                  </div>
+                                )}
+                                <span className="gc-popular-badge">
+                                  <FontAwesomeIcon icon={faFire} /> Popular
+                                </span>
+                                {isOutOfStock && (
+                                  <span className="gc-stock-badge gc-stock-badge-out gc-popular-stock-badge">
+                                    Out of stock
+                                  </span>
+                                )}
+                              </div>
+                              <div className="gc-product-info">
+                                <span className="gc-pack-count">
+                                  {popularPackCount} popular packs
+                                </span>
+                                <div className="gc-product-title">
+                                  <h3>{product.name}</h3>
+                                </div>
+                                <div className="gc-product-footer">
+                                  <span className="gc-view-link">
+                                    Choose pack{" "}
+                                    <FontAwesomeIcon icon={faArrowRight} />
+                                  </span>
+                                </div>
+                              </div>
+                            </button>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </section>
+              )}
+
+              {[
+                {
+                  id: "gc-game-top-up",
+                  title: "Game Top-up",
+                  products: gameProducts,
+                },
+                {
+                  id: "gc-gift-cards",
+                  title: "Gift Cards",
+                  products: giftCardProducts,
+                },
+                {
+                  id: "gc-digital-codes",
+                  title: "Digital Codes",
+                  products: digitalCodeCards,
+                },
+              ]
+                .filter((section) => section.products.length > 0)
+                .map((section) => (
+                  <section
+                    className="gc-catalog-section"
+                    id={section.id}
+                    key={section.id}
+                    aria-labelledby={`${section.id}-title`}
+                  >
+                    <div className="gc-catalog-section-heading">
+                      <div>
+                        <span className="gc-section-kicker">EXPLORE BY TYPE</span>
+                        <h3 id={`${section.id}-title`}>{section.title}</h3>
+                      </div>
+                      <span className="gc-shortcut-limit">
+                        {section.products.length} products
+                      </span>
+                    </div>
+
+                    <div className="gc-product-grid">
+                      {section.products.map((product) => {
+                        const packs = (product.packs || []).filter(
+                          (pack) => pack?.able !== false
+                        );
+                        const inStockPacks = packs.filter(isPackInStock);
+                        const isOutOfStock =
+                          packs.length > 0 && inStockPacks.length === 0;
+                        const popular = packs.some((pack) => pack.popular);
+                        const isDigitalCode = getProductKind(product) === "digital-code";
+                        const startingPrice = getStartingPrice(product);
+                        const productType = String(product.type || "").trim();
+                        const isGiftCards =
+                          productType.toLowerCase() === "gift cards";
+
+                        return (
+                          <article
+                            className={`gc-product-card${isDigitalCode ? " gc-digital-code-card" : ""}${isOutOfStock ? " out-of-stock" : ""}`}
+                            key={product.digitalCodeGroupKey || product.id}
+                            id={`gc-product-${product.id}`}
+                          >
+                            <button
+                              type="button"
+                              className="gc-product-click"
+                              onClick={() => openProduct(product)}
+                              disabled={isOutOfStock}
+                              aria-label={
+                                isOutOfStock
+                                  ? `${product.name} - Out of stock`
+                                  : `Choose ${product.name}`
+                              }
+                            >
+                              <div className="gc-product-image">
+                                {isDigitalCode
+                                  ? <img className="gc-digital-poster" src={getImageUrl(product.image)} alt={product.name} loading="lazy" />
+                                  : <ProductImage src={getImageUrl(product.image)} alt={product.name} />}
+
+                                {isDigitalCode && (
+                                  <div className="gc-digital-code-overlay">
+                                    <div className="gc-digital-code-overlay-meta">
+                                      <strong>{product.publisher || "Digital game"}</strong>
+                                      <DigitalPlatformIconList product={product} variants={product.digitalCodeVariants} />
+                                    </div>
+                                    <span>{startingPrice === null ? "Price unavailable" : formatPrice(startingPrice)}</span>
+                                    <small>{product.name}</small>
+                                  </div>
+                                )}
+
+                                {productType && (
+                                  <span
+                                    className={`gc-product-type${isGiftCards ? " gift" : ""}`}
+                                  >
+                                    {productType}
+                                  </span>
+                                )}
+
+                                {popular && (
+                                  <span className="gc-popular-badge">
+                                    <FontAwesomeIcon icon={faFire} /> Popular
+                                  </span>
+                                )}
+
+                                <span className="gc-product-open">
+                                  <FontAwesomeIcon icon={faArrowRight} />
+                                </span>
+                              </div>
+
+                              <div className="gc-product-info">
+                                <span className="gc-pack-count">
+                                  {inStockPacks.length} available packs
+                                </span>
+                                {isOutOfStock && (
+                                  <span className="gc-stock-badge gc-stock-badge-out gc-product-stock-badge">
+                                    Out of stock
+                                  </span>
+                                )}
+
+                                <div className="gc-product-title">
+                                  <h3>{product.name}</h3>
+                                </div>
+
+                                <div className="gc-product-footer">
+                                  <span className="gc-view-link">
+                                    Choose pack{" "}
+                                    <FontAwesomeIcon icon={faArrowRight} />
+                                  </span>
+                                </div>
+                              </div>
+                            </button>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  </section>
+                ))}
+            </>
+          )}
+        </section>
+
+        <footer className="gc-footer">
+          <span className="gc-footer-mark">
+            <img src="/logo.png" alt="GameOnix Logo" className="logo-img"/>
+          </span>
+          <p>
+            <strong>GameOnix</strong>
+            <span>Your next adventure starts here.</span>
+          </p>
+        </footer>
+      </div>
+
+      {selectedProduct && (
+        <div
+          className="gc-modal-overlay"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeProduct();
+          }}
+        >
+          <section
+            className={`gc-checkout-modal${user ? "" : " gc-auth-required-modal"}`}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="gc-modal-title"
+          >
+            <header className="gc-checkout-header">
+              <div className="gc-currency" aria-label="Currency: Egyptian pound">
+                <span className="gc-egypt-flag">🇪🇬</span>
+                <strong>EGP</strong>
+              </div>
+
+              <h2>Checkout</h2>
+
+              <button
+                type="button"
+                className="gc-modal-close"
+                onClick={closeProduct}
+                aria-label="Close checkout"
+              >
+                <FontAwesomeIcon icon={faXmark} />
+              </button>
+            </header>
+
+            {authLoading ? (
+              <div className="gc-auth-gate" role="status">
+                <div className="gc-auth-gate-spinner" />
+                <h3 id="gc-modal-title">Checking your account...</h3>
+              </div>
+            ) : !user ? (
+              <div className="gc-auth-gate">
+                <ProductImage
+                  src={getImageUrl(selectedProduct.image)}
+                  alt={selectedProduct.name}
+                  className="gc-auth-product-image"
+                />
+                <span className="gc-auth-gate-kicker">ONE MORE STEP</span>
+                <h3 id="gc-modal-title">Sign in before you buy</h3>
+                <p>
+                  Sign in to choose a pack for {selectedProduct.name} and
+                  continue with your purchase.
+                </p>
+                <button
+                  type="button"
+                  className="gc-login-required-button"
+                  onClick={() =>
+                    navigate("/login", {
+                      state: { from: "/shopping/game-cards" },
+                    })
+                  }
+                >
+                  Sign in to continue
+                  <FontAwesomeIcon icon={faArrowRight} />
+                </button>
+              </div>
+            ) : (
+            <form className="gc-checkout-body" onSubmit={handleCheckout}>
+              <div className="gc-checkout-left">
+                <div className="gc-contact-card">
+                  <CheckoutUserAvatar user={user} />
+
+                  <div className="gc-contact-copy">
+                    <strong>{user.name || user.username}</strong>
+                    <span>{user.email || `@${user.username}`}</span>
+                  </div>
+                </div>
+
+                <section className="gc-order-section">
+                  <div className="gc-checkout-label">ORDER SUMMARY</div>
+
+                  <div className="gc-order-card">
+                    <div className="gc-order-product">
+                      <PopupGameIcon
+                        product={selectedProduct}
+                        className="gc-order-image"
+                      />
+
+                      <div className="gc-order-details">
+                        <strong id="gc-modal-title">
+                          {selectedProduct.name}
+                        </strong>
+
+                        <span>
+                          {selectedPack
+                            ? `${selectedPack.title} ${selectedPack.type || ""}`
+                            : "Select a pack below"}
+                        </span>
+                      </div>
+
+                      <button
+                        type="button"
+                        className="gc-remove-pack"
+                        onClick={() => setSelectedPack(null)}
+                        disabled={!selectedPack}
+                        aria-label="Remove selected pack"
+                      >
+                        <FontAwesomeIcon icon={faXmark} />
+                      </button>
+                    </div>
+
+                    {selectedPack && (
+                      <div className="gc-quantity-row">
+                        <span>Quantity</span>
+
+                        <div className="gc-quantity-control">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setQuantity((q) => Math.max(1, q - 1))
+                            }
+                            disabled={quantity <= 1}
+                            aria-label="Decrease quantity"
+                          >
+                            −
+                          </button>
+
+                          <strong>{quantity}</strong>
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setQuantity((q) => Math.min(5, q + 1))
+                            }
+                            disabled={quantity >= 5}
+                            aria-label="Increase quantity"
+                          >
+                            +
+                          </button>
+                        </div>
+
+                        <strong className="gc-order-price">
+                          {formatPrice(selectedPack.price * quantity)}
+                        </strong>
+                      </div>
+                    )}
+
+                    <div className="gc-price-lines">
+                      <div>
+                        <span>Subtotal</span>
+                        <strong>{formatPrice(subtotal)}</strong>
+                      </div>
+
+                      <div>
+                        <span>Fees</span>
+                        <strong>Calculated at payment</strong>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                {canSendGift && (
+                  <label className="gc-gift-toggle">
+                    <span className="gc-gift-icon">
+                      <FontAwesomeIcon icon={faGift} />
+                    </span>
+
+                    <span className="gc-gift-copy">
+                      <strong>Send as a gift</strong>
+                      <small>Enter the recipient's details</small>
+                    </span>
+
+                    <input
+                      type="checkbox"
+                      checked={isGift}
+                      onChange={(event) => {
+                        setIsGift(event.target.checked);
+                        setCheckoutMessage("");
+                      }}
+                    />
+
+                    <span className="gc-switch" />
+                  </label>
+                )}
+
+                <div className="gc-fields-card">
+                  <div className="gc-fields-heading">
+                    <span>ACCOUNT INFORMATION</span>
+                    <small>Required to process an order</small>
+                  </div>
+
+                  {!isGiftCardProduct && selectedProduct.idType && (
+                    <div className="gc-id-format-hint" role="note">
+                      <span className="gc-id-format-label">
+                        Required account ID format
+                      </span>
+                      <strong>{selectedProduct.idType}</strong>
+                      <small>Enter the ID exactly as it appears in the game.</small>
+                    </div>
+                  )}
+
+                  {isGiftOrder ? (
+                    <>
+                      {!isGiftCardProduct && (
+                        <label className="gc-field">
+                          <span>Recipient Player ID / Account</span>
+                          <input
+                            value={recipient}
+                            onChange={(event) => setRecipient(event.target.value)}
+                            placeholder="Enter recipient details"
+                          />
+                        </label>
+                      )}
+
+                      <label className="gc-field">
+                        <span>
+                          Recipient email
+                          {isGiftCardProduct ? " (required for Gift Cards)" : " (optional)"}
+                        </span>
+                        <input
+                          type="email"
+                          value={email}
+                          onChange={(event) => setEmail(event.target.value)}
+                          placeholder="recipient@example.com"
+                          required={isGiftCardProduct}
+                        />
+                        {email.trim() &&
+                          email.trim().toLowerCase() ===
+                            String(user?.email || "").trim().toLowerCase() && (
+                            <small role="status">
+                              This is the same as your current account email.
+                            </small>
+                          )}
+                      </label>
+
+                      <EmailSuggestion
+                        suggestion={giftEmailSuggestion}
+                        onAccept={(next) => {
+                          setEmail(next);
+                          setCheckoutMessage("");
+                        }}
+                        onDismiss={() => keepTypedEmail("gift-email", email)}
+                      />
+                    </>
+                  ) : (
+                    <>
+                      {!isGiftCardProduct && (
+                        <label className="gc-field">
+                          <span>Player ID / Account ID</span>
+                          <input
+                            value={playerId}
+                            onChange={(event) => setPlayerId(event.target.value)}
+                            placeholder="Enter your Player ID"
+                          />
+                        </label>
+                      )}
+
+                      {!isGiftCardProduct && (
+                        <label className="gc-field">
+                          <span>Server / Region (if required)</span>
+                          <input
+                            value={serverId}
+                            onChange={(event) => setServerId(event.target.value)}
+                            placeholder="Enter server or region"
+                          />
+                        </label>
+                      )}
+
+                    </>
+                  )}
+
+                  {selectedPaymentMethod?.["mobile-number"] && (
+                    <label className="gc-field">
+                      <span>
+                        Mobile phone number ({selectedPaymentMethod.name})
+                      </span>
+                      <input
+                        type="tel"
+                        inputMode="tel"
+                        autoComplete="tel"
+                        value={phoneNumber}
+                        onChange={(event) => setPhoneNumber(event.target.value)}
+                        placeholder="Enter your mobile number"
+                        required
+                      />
+                    </label>
+                  )}
+                  <label className="gc-field">
+                    <span>WhatsApp number (for order communication)</span>
+                    <input
+                      type="tel"
+                      inputMode="tel"
+                      autoComplete="tel"
+                      value={whatsappNumber}
+                      onChange={(event) =>
+                        setWhatsappNumber(event.target.value)
+                      }
+                      placeholder="Enter a number we can reach you on"
+                      required
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div className="gc-checkout-right" ref={checkoutRightRef}>
+                {selectedProductVariants.length > 1 && <section className="gc-checkout-platform-picker" aria-label="Choose a platform">
+                  <div className="gc-checkout-label">CHOOSE YOUR PLATFORM</div>
+                  <div className="gc-checkout-platform-options">
+                    {selectedProductVariants.map((variant) => <button
+                      type="button"
+                      key={variant.id}
+                      className={String(variant.id) === String(selectedProduct.id) ? "active" : ""}
+                      aria-pressed={String(variant.id) === String(selectedProduct.id)}
+                      onClick={() => { setSelectedDigitalVariants((current) => ({ ...current, [String(variant.digitalCodeGroup).trim().toLowerCase()]: String(variant.id) })); void openProduct(variant); }}
+                    >
+                      <DigitalPlatformIcon product={variant} />
+                      <span>{getDigitalPlatformLabel(variant)}</span>
+                      <small>{getStartingPrice(variant) === null ? "Price unavailable" : `From ${formatPrice(getStartingPrice(variant))}`}</small>
+                    </button>)}
+                  </div>
+                </section>}
+                <section className="gc-pack-selector">
+                  <div className="gc-checkout-label">
+                    SELECT YOUR PACK
+                    <span>
+                      {(selectedProduct.packs || []).filter(
+                        (pack) => pack?.able !== false
+                      ).length}{" "}
+                      options
+                    </span>
+                  </div>
+
+                  <div className="gc-modal-product-heading">
+                    <PopupGameIcon
+                      product={selectedProduct}
+                      className="gc-modal-product-image"
+                    />
+
+                    <div className="gc-modal-product-heading-copy">
+                      <h3>{selectedProduct.name}</h3>
+                      <p>Choose the exact amount you want to purchase.</p>
+                    </div>
+                  </div>
+
+                  <div className="gc-pack-grid">
+                    {(selectedProduct.packs || [])
+                      .map((pack, index) => ({ pack, index }))
+                      .filter(({ pack }) => pack?.able !== false)
+                      .map(({ pack, index }) => {
+                      const inStock = isPackInStock(pack);
+                      const isSelected =
+                        selectedPack === pack ||
+                        (selectedPack &&
+                          selectedPack.title === pack.title &&
+                          selectedPack.type === pack.type &&
+                          selectedPack.price === pack.price);
+
+                      return (
+                        <button
+                          type="button"
+                          key={`${selectedProduct.id}-${pack.title}-${index}`}
+                          className={`gc-pack-card${isSelected ? " selected" : ""}${inStock ? "" : " out-of-stock"
+                            }`}
+                          onClick={() => choosePack(pack)}
+                          disabled={!inStock}
+                          aria-label={`${pack.title} ${pack.type || ""} - ${
+                            inStock ? "In Stock" : "Out of stock"
+                          }`}
+                        >
+                          {pack.popular && (
+                            <span className="gc-pack-popular">
+                              <FontAwesomeIcon icon={faFire} /> Popular
+                            </span>
+                          )}
+
+                          <ProductImage
+                            src={getGameIconUrl(selectedProduct)}
+                            alt={selectedProduct.name}
+                            className="gc-pack-image"
+                          />
+
+                          <strong className="gc-pack-title">
+                            {pack.title} {pack.type || ""}
+                          </strong>
+
+                          <span
+                            className={`gc-stock-badge ${
+                              inStock ? "gc-stock-badge-in" : "gc-stock-badge-out"
+                            }`}
+                          >
+                            {inStock ? "In Stock" : "Out of stock"}
+                          </span>
+
+                          <span className="gc-pack-price">
+                            {formatPrice(pack.price)}
+                          </span>
+
+                          {pack.oldPrice && (
+                            <span className="gc-old-price">
+                              {formatPrice(pack.oldPrice)}
+                            </span>
+                          )}
+
+                          <span className="gc-pack-check">
+                            <FontAwesomeIcon icon={faCheck} />
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+
+                <section className="gc-payment-section">
+                  <div className="gc-checkout-label">
+                    SELECT PAYMENT METHOD
+                  </div>
+
+                  {paymentsLoading && (
+                    <p className="gc-payment-state" role="status">
+                      Loading payment methods...
+                    </p>
+                  )}
+                  {paymentsError && (
+                    <div className="gc-payment-state error" role="alert">
+                      <span>{paymentsError}</span>
+                      <button type="button" onClick={loadPaymentMethods}>
+                        Try again
+                      </button>
+                    </div>
+                  )}
+                  {!paymentsLoading &&
+                    !paymentsError &&
+                    paymentMethods.length === 0 && (
+                    <p className="gc-payment-state" role="status">
+                      No payment methods are configured.
+                    </p>
+                    )}
+                  <div className="gc-payment-grid">
+                      {paymentMethods.map((method) => (
+                        <button
+                          type="button"
+                          key={`${method.name}-${method.logo}`}
+                          data-method={method.name
+                            .toLowerCase()
+                            .replace(/[^a-z0-9]+/g, "-")
+                            .replace(/(^-|-$)/g, "")}
+                          disabled={!method.av}
+                          onClick={() => {
+                            setSelectedPayment(method.name);
+                            setCheckoutMessage("");
+                          }}
+                          className={[
+                            "gc-payment-method",
+                            selectedPayment === method.name ? "selected" : "",
+                            !method.av ? "disabled" : "",
+                          ].join(" ")}
+                          aria-pressed={selectedPayment === method.name}
+                          title={
+                            method.av
+                              ? method["mobile-number"]
+                                ? "Available; mobile number required"
+                                : "Available; no mobile number required"
+                              : "Currently unavailable"
+                          }
+                        >
+                          <span className="gc-payment-instant">
+                            {method.av && <FontAwesomeIcon icon={faBolt} />}{" "}
+                            {method.av ? "AVAILABLE" : "UNAVAILABLE"}
+                          </span>
+
+                          <span className="gc-payment-main">
+                            <span className="gc-payment-logo">
+                              <PaymentMethodLogo
+                                key={method.logo}
+                                method={method}
+                              />
+                            </span>
+
+                            <span className="gc-payment-copy">
+                              <strong>{method.name}</strong>
+                              <small className="gc-payment-requirement">
+                                {method["mobile-number"]
+                                  ? "Phone number required"
+                                  : "No phone number needed"}
+                              </small>
+                            </span>
+                          </span>
+
+                          {selectedPayment === method.name && (
+                            <span className="gc-payment-check">
+                              <FontAwesomeIcon icon={faCheck} />
+                            </span>
+                          )}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        key={WALLET_PAYMENT_ID}
+                        disabled={!walletPaymentMethod.av}
+                        onClick={() => {
+                          setSelectedPayment(WALLET_PAYMENT_ID);
+                          setCheckoutMessage("");
+                        }}
+                        className={[
+                          "gc-payment-method",
+                          "gc-wallet-payment",
+                          selectedPayment === WALLET_PAYMENT_ID ? "selected" : "",
+                          !walletPaymentMethod.av ? "disabled" : "",
+                        ].join(" ")}
+                        aria-pressed={selectedPayment === WALLET_PAYMENT_ID}
+                        title={
+                          walletBalanceLoading
+                            ? "Loading wallet balance"
+                            : walletBalanceError || "Pay with your GameOnix wallet"
+                        }
+                      >
+                        <span className="gc-payment-instant">
+                          {walletBalanceLoading ? "LOADING" : "WALLET"}
+                        </span>
+                        <span className="gc-payment-main">
+                          <span className="gc-wallet-payment-icon">
+                            <FontAwesomeIcon icon={faWallet} />
+                          </span>
+                          <span className="gc-payment-copy">
+                            <strong>Wallet</strong>
+                            <small className="gc-payment-requirement">
+                              {walletBalanceLoading
+                                ? "Loading balance..."
+                                : walletBalance === null
+                                  ? "Balance unavailable"
+                                  : `Balance ${formatPrice(walletBalance)}`}
+                            </small>
+                          </span>
+                        </span>
+                        {selectedPayment === WALLET_PAYMENT_ID && (
+                          <span className="gc-payment-check">
+                            <FontAwesomeIcon icon={faCheck} />
+                          </span>
+                        )}
+                      </button>
+                    </div>
+
+                  <div className="gc-security-row">
+                    <span>
+                      <FontAwesomeIcon icon={faLock} /> Secure checkout
+                    </span>
+                    <span>
+                      <FontAwesomeIcon icon={faBolt} /> Digital product
+                    </span>
+                    <span>
+                      <FontAwesomeIcon icon={faShieldHalved} /> Order details
+                    </span>
+                  </div>
+                </section>
+
+                {isDigitalCodeProduct && (
+                  <section className="gc-code-contact-card" aria-label="Digital code payment and contact">
+                    <strong>Complete your digital code order</strong>
+                    {selectedProduct.paymentNumber && <p>Payment number <bdi dir="ltr">{selectedProduct.paymentNumber}</bdi></p>}
+                    {selectedProduct.whatsappNumber && <p>WhatsApp <a href={`https://wa.me/${String(selectedProduct.whatsappNumber).replace(/[^\d]/g, "")}`} target="_blank" rel="noreferrer"><bdi dir="ltr">{selectedProduct.whatsappNumber}</bdi></a></p>}
+                  </section>
+                )}
+
+                {checkoutMessage && (
+                  <div className="gc-checkout-message" role="status">
+                    {checkoutMessage}
+                  </div>
+                )}
+
+                <div className="gc-payment-footer">
+                  <div className="gc-total-row">
+                    <span>TOTAL</span>
+                    <strong>{formatPrice(total)}</strong>
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="gc-pay-button"
+                    disabled={
+                      !selectedPack ||
+                      checkoutSubmitting ||
+                      checkoutOrderSubmitted ||
+                      !selectedPaymentMethod?.av
+                    }
+                  >
+                    <FontAwesomeIcon icon={checkoutSubmitting ? faRotate : faLock} />
+                    {checkoutSubmitting
+                      ? "Sending request..."
+                      : checkoutOrderSubmitted
+                        ? "Request sent"
+                        : `Continue · ${formatPrice(total)}`}
+                  </button>
+
+                  <p className="gc-terms">
+                    {selectedPaymentMethod?.isWallet
+                      ? "Your request is reviewed by the admin. Wallet funds are deducted only after approval."
+                      : "Your order request is sent for admin approval. This website will not charge your wallet for this payment method."}
+                  </p>
+                </div>
+              </div>
+            </form>
+            )}
+          </section>
+        </div>
+      )}
+
+      {checkoutToast && (
+        <div className="gc-checkout-toast" role="status" aria-live="polite">
+          <span className="gc-checkout-toast-icon"><FontAwesomeIcon icon={faCheck} /></span>
+          <span>{checkoutToast}</span>
+          <button type="button" onClick={() => setCheckoutToast("")} aria-label="Dismiss notification">
+            <FontAwesomeIcon icon={faXmark} />
+          </button>
+        </div>
+      )}
+    </main>
+  );
+}
+
+export default GameCards;
