@@ -202,6 +202,7 @@ function Sidebar({ collapsed, onToggle }) {
   const [showLogoutPopup, setShowLogoutPopup] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [logoutError, setLogoutError] = useState("");
+  const [activeDownloadCount, setActiveDownloadCount] = useState(0);
   const [unreadNotifications, setUnreadNotifications] = useState({
     username: "",
     count: 0,
@@ -210,6 +211,22 @@ function Sidebar({ collapsed, onToggle }) {
     username: "",
     allowed: false,
   });
+
+  useEffect(() => {
+    const downloads = window.gameonixDesktop?.downloads;
+    if (!downloads) return undefined;
+
+    const updateActiveCount = (items) => {
+      setActiveDownloadCount(
+        items.filter((item) => ["starting", "downloading"].includes(item.status)).length
+      );
+    };
+    const unsubscribe = downloads.onUpdate(updateActiveCount);
+    void downloads.list().then(updateActiveCount).catch((error) => {
+      console.error("Sidebar download count load failed:", error);
+    });
+    return unsubscribe;
+  }, []);
 
   useEffect(() => {
     if (!user || authLoading) return undefined;
@@ -354,9 +371,11 @@ function Sidebar({ collapsed, onToggle }) {
                     collapsed
                       ? [
                           item.label,
-                          item.to === "/notifications" && unreadCount
-                            ? `${unreadCount} unread`
-                            : item.badge,
+                          item.to === "/downloads" && activeDownloadCount
+                            ? `${activeDownloadCount} active downloads`
+                            : item.to === "/notifications" && unreadCount
+                              ? `${unreadCount} unread`
+                              : item.badge,
                         ]
                           .filter(Boolean)
                           .join(" — ")
@@ -390,6 +409,15 @@ function Sidebar({ collapsed, onToggle }) {
                         </span>
                       )}
 
+                      {item.to === "/downloads" && activeDownloadCount > 0 && (
+                        <span
+                          className="sidebar-active-download-badge"
+                          aria-label={`${activeDownloadCount} active downloads`}
+                        >
+                          {activeDownloadCount > 99 ? "+99" : activeDownloadCount}
+                        </span>
+                      )}
+
                       <span className="sidebar-link-indicator">
                         <FontAwesomeIcon icon={faChevronRight} />
                       </span>
@@ -405,6 +433,14 @@ function Sidebar({ collapsed, onToggle }) {
                         {unreadBadgeText}
                       </span>
                     )}
+                  {collapsed && item.to === "/downloads" && activeDownloadCount > 0 && (
+                    <span
+                      className="sidebar-active-download-badge"
+                      aria-label={`${activeDownloadCount} active downloads`}
+                    >
+                      {activeDownloadCount > 99 ? "+99" : activeDownloadCount}
+                    </span>
+                  )}
                 </NavLink>
               ))}
             </div>

@@ -202,7 +202,8 @@
     transform 150ms ease;
 }
 
-.sidebar-notification-badge {
+.sidebar-notification-badge,
+.sidebar-active-download-badge {
   position: absolute;
   right: 31px;
   top: 50%;
@@ -438,7 +439,8 @@
   padding: 0;
 }
 
-.sidebar-collapsed .sidebar-notification-badge {
+.sidebar-collapsed .sidebar-notification-badge,
+.sidebar-collapsed .sidebar-active-download-badge {
   top: 3px;
   right: 3px;
   transform: none;
@@ -677,12 +679,17 @@
   .sidebar-nav .sidebar-link-label,
   .sidebar-nav .sidebar-link-indicator,
   .sidebar-nav .sidebar-notification-badge,
+  .sidebar-nav .sidebar-active-download-badge,
   .sidebar-account-link .account-copy,
   .sidebar-account-link .account-arrow {
     display: none;
   }
 
   .sidebar-nav .sidebar-link[href="/notifications"] .sidebar-notification-badge {
+    display: block;
+  }
+
+  .sidebar-nav .sidebar-link[href="/downloads"] .sidebar-active-download-badge {
     display: block;
   }
 

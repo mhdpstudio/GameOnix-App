@@ -28,6 +28,10 @@ contextBridge.exposeInMainWorld('gameonixDesktop', {
     get: () => ipcRenderer.invoke('settings:get'),
     update: (patch) => ipcRenderer.invoke('settings:update', patch),
   },
+  notifications: {
+    show: (notification) => ipcRenderer.invoke('notifications:show', notification),
+    setUnreadCount: (count) => ipcRenderer.invoke('notifications:set-unread-count', count),
+  },
   downloads: {
     list: () => ipcRenderer.invoke('downloads:list'),
     start: (game) => ipcRenderer.invoke('downloads:start', game),

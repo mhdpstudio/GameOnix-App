@@ -198,6 +198,7 @@ function Topbar() {
     const searchAreaRef = useRef(null);
     const accountActionsRef = useRef(null);
     const activeUsernameRef = useRef(null);
+    const seenNotificationIdsRef = useRef({ username: "", ids: new Set() });
 
     const navigate = useNavigate();
     const { user, authLoading, logout } = useAuth();
@@ -209,6 +210,14 @@ function Topbar() {
     const unreadCount = visibleNotifications.filter(
         (notification) => !notification.readAt
     ).length;
+
+    useEffect(() => {
+        const notify = window.gameonixDesktop?.notifications;
+        if (!notify?.setUnreadCount) return;
+        void notify.setUnreadCount(unreadCount).catch((error) => {
+            console.error("Windows notification badge update failed:", error);
+        });
+    }, [unreadCount]);
 
     useEffect(() => {
         if (!deleteAllConfirmOpen && !logoutConfirmOpen) return undefined;
@@ -287,6 +296,31 @@ function Topbar() {
             }
 
             if (activeUsernameRef.current !== user.username) return;
+            const seenState = seenNotificationIdsRef.current;
+            if (seenState.username !== user.username) {
+                seenNotificationIdsRef.current = {
+                    username: user.username,
+                    ids: new Set(loadedNotifications.map((notification) => String(notification.id))),
+                };
+            } else {
+                const newlyReceived = loadedNotifications.filter((notification) =>
+                    !notification.readAt &&
+                    notification.id != null &&
+                    !seenState.ids.has(String(notification.id))
+                );
+                for (const notification of loadedNotifications) {
+                    if (notification.id != null) seenState.ids.add(String(notification.id));
+                }
+                for (const notification of newlyReceived.slice(0, 5)) {
+                    void window.gameonixDesktop?.notifications?.show({
+                        title: notification.title || "GameOnix",
+                        body: notification.message || "You have a new notification.",
+                        route: "/notifications",
+                    }).catch((error) => {
+                        console.error("Windows notification display failed:", error);
+                    });
+                }
+            }
             setNotifications(loadedNotifications);
             setNotificationsOwner(user.username);
         } catch (error) {

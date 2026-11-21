@@ -1,8 +1,9 @@
-const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, net, protocol, shell, Tray } = require('electron')
+const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, net, Notification, protocol, shell, Tray } = require('electron')
 const fs = require('node:fs/promises')
 const fsSync = require('node:fs')
 const path = require('node:path')
 const crypto = require('node:crypto')
+const zlib = require('node:zlib')
 const { spawn } = require('node:child_process')
 const { Readable, Transform } = require('node:stream')
 const { pipeline } = require('node:stream/promises')
@@ -31,6 +32,7 @@ let tray
 let isQuitting = false
 let shutdownInProgress = false
 let shutdownComplete = false
+let unreadNotificationCount = 0
 let appSettings = {
   closeToTray: true,
   launchAtStartup: false,
@@ -47,6 +49,129 @@ function publishUpdaterState() {
 function setUpdaterState(patch) {
   updaterState = { ...updaterState, ...patch }
   publishUpdaterState()
+}
+
+function updateTaskbarNotificationOverlay(count = unreadNotificationCount) {
+  unreadNotificationCount = Math.max(0, Math.min(999999, Math.floor(Number(count) || 0)))
+  let overlay = null
+  if (process.platform === 'win32' && unreadNotificationCount > 0) {
+    const label = unreadNotificationCount > 99 ? '99+' : String(unreadNotificationCount)
+    overlay = nativeImage.createFromBuffer(createNotificationBadgePng(label))
+  }
+  for (const window of windows) {
+    if (!window.isDestroyed()) {
+      window.setOverlayIcon(overlay, unreadNotificationCount ? `${unreadNotificationCount} unread notifications` : '')
+    }
+  }
+}
+
+function createNotificationBadgePng(label) {
+  const glyphs = {
+    '0': ['111', '101', '101', '101', '111'],
+    '1': ['010', '110', '010', '010', '111'],
+    '2': ['111', '001', '111', '100', '111'],
+    '3': ['111', '001', '111', '001', '111'],
+    '4': ['101', '101', '111', '001', '001'],
+    '5': ['111', '100', '111', '001', '111'],
+    '6': ['111', '100', '111', '101', '111'],
+    '7': ['111', '001', '010', '010', '010'],
+    '8': ['111', '101', '111', '101', '111'],
+    '9': ['111', '101', '111', '001', '111'],
+    '+': ['010', '010', '111', '010', '010'],
+  }
+  const width = 32
+  const height = 32
+  const scale = label.length === 1 ? 4 : label.length === 2 ? 3 : 2
+  const charWidth = 3 * scale
+  const spacing = scale
+  const textWidth = label.length * charWidth + Math.max(0, label.length - 1) * spacing
+  const textHeight = 5 * scale
+  const textX = Math.floor((width - textWidth) / 2)
+  const textY = Math.floor((height - textHeight) / 2)
+  const pixels = Buffer.alloc(width * height * 4)
+  const putPixel = (x, y, color) => {
+    if (x < 0 || y < 0 || x >= width || y >= height) return
+    const offset = (y * width + x) * 4
+    pixels[offset] = color[0]
+    pixels[offset + 1] = color[1]
+    pixels[offset + 2] = color[2]
+    pixels[offset + 3] = color[3]
+  }
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const dx = x + 0.5 - width / 2
+      const dy = y + 0.5 - height / 2
+      if (dx * dx + dy * dy <= 15.5 * 15.5) putPixel(x, y, [239, 73, 102, 255])
+    }
+  }
+
+  [...label].forEach((character, characterIndex) => {
+    const rows = glyphs[character]
+    if (!rows) return
+    rows.forEach((row, rowIndex) => {
+      for (let column = 0; column < row.length; column += 1) {
+        if (row[column] !== '1') continue
+        for (let y = 0; y < scale; y += 1) {
+          for (let x = 0; x < scale; x += 1) {
+            putPixel(
+              textX + characterIndex * (charWidth + spacing) + column * scale + x,
+              textY + rowIndex * scale + y,
+              [255, 255, 255, 255],
+            )
+          }
+        }
+      }
+    })
+  })
+
+  const rows = Buffer.alloc((width * 4 + 1) * height)
+  for (let y = 0; y < height; y += 1) pixels.copy(rows, y * (width * 4 + 1) + 1, y * width * 4, (y + 1) * width * 4)
+  const crcTable = createNotificationPngCrcTable()
+  const chunk = (type, data) => {
+    const typeBuffer = Buffer.from(type)
+    const length = Buffer.alloc(4)
+    length.writeUInt32BE(data.length)
+    const checksumInput = Buffer.concat([typeBuffer, data])
+    let checksum = 0xffffffff
+    for (const byte of checksumInput) checksum = crcTable[(checksum ^ byte) & 0xff] ^ (checksum >>> 8)
+    const checksumBuffer = Buffer.alloc(4)
+    checksumBuffer.writeUInt32BE((checksum ^ 0xffffffff) >>> 0)
+    return Buffer.concat([length, typeBuffer, data, checksumBuffer])
+  }
+  const header = Buffer.alloc(13)
+  header.writeUInt32BE(width, 0)
+  header.writeUInt32BE(height, 4)
+  header[8] = 8
+  header[9] = 6
+  return Buffer.concat([
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    chunk('IHDR', header),
+    chunk('IDAT', zlib.deflateSync(rows)),
+    chunk('IEND', Buffer.alloc(0)),
+  ])
+}
+
+function createNotificationPngCrcTable() {
+  const table = new Uint32Array(256)
+  for (let index = 0; index < 256; index += 1) {
+    let value = index
+    for (let bit = 0; bit < 8; bit += 1) value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1
+    table[index] = value >>> 0
+  }
+  return table
+}
+
+function showWindowsNotification(title, body, route = '/notifications') {
+  if (!Notification.isSupported()) return false
+  const notification = new Notification({
+    title: String(title || 'GameOnix').slice(0, 120),
+    body: String(body || '').slice(0, 500),
+    icon: getTrayIconPath(),
+  })
+  notification.on('click', () => openMainRoute(route === '/downloads' ? '/downloads' : '/notifications'))
+  notification.show()
+  return true
 }
 
 function compareVersions(left, right) {
@@ -274,7 +399,7 @@ function startStatsTimer() {
     for (const [id, torrent] of activeTorrents) {
       const item = downloads.get(id)
       if (!item || !torrent || torrent.destroyed) continue
-      const speed = getSmoothedSpeed(torrent, item)
+      const speed = torrent.paused ? 0 : getSmoothedSpeed(torrent, item)
       const total = Number(torrent.length) || Number(item.total) || 0
       const downloaded = Number(torrent.downloaded) || Number(item.downloaded) || 0
       const remaining = Math.max(0, total - downloaded)
@@ -339,6 +464,8 @@ async function startTorrent(item, { paused = false } = {}) {
     item.speed = 0
     item.etaSeconds = 0
     void saveAndPublish()
+    showWindowsNotification('Download Has been completed', `${item.title} has finished downloading.`, '/downloads')
+    syncTray()
   })
   torrent.on('error', (error) => {
     item.status = 'error'
@@ -399,6 +526,14 @@ function getMainWindow() {
   return [...windows].find((window) => !window.isDestroyed())
 }
 
+function hasActiveDownloads() {
+  return [...downloads.values()].some((item) => item.status === 'downloading' || item.status === 'starting')
+}
+
+function hasHiddenWindow() {
+  return [...windows].some((window) => !window.isDestroyed() && !window.isVisible())
+}
+
 function showMainWindow() {
   let window = getMainWindow()
   if (!window) window = createWindow()
@@ -406,6 +541,7 @@ function showMainWindow() {
   window.maximize()
   window.show()
   window.focus()
+  syncTray()
   return window
 }
 
@@ -415,7 +551,7 @@ function openMainRoute(route) {
 }
 
 function syncTray() {
-  if (!appSettings.closeToTray && !appSettings.launchAtStartup) {
+  if (!appSettings.closeToTray && !appSettings.launchAtStartup && !hasActiveDownloads() && !hasHiddenWindow()) {
     tray?.destroy()
     tray = null
     return
@@ -472,9 +608,11 @@ function createWindow({ startHidden = false } = {}) {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      backgroundThrottling: false,
     },
   })
   windows.add(window)
+  updateTaskbarNotificationOverlay()
   const publishWindowState = () => {
     if (!window.isDestroyed()) window.webContents.send('window:state', window.isMaximized())
   }
@@ -485,7 +623,7 @@ function createWindow({ startHidden = false } = {}) {
     if (!startHidden) window.show()
   })
   window.on('close', (event) => {
-    if (isQuitting || !appSettings.closeToTray) return
+    if (isQuitting || (!appSettings.closeToTray && !hasActiveDownloads())) return
     event.preventDefault()
     window.hide()
     syncTray()
@@ -508,6 +646,16 @@ function createWindow({ startHidden = false } = {}) {
 }
 
 function registerDownloadIpc() {
+  ipcMain.handle('notifications:set-unread-count', (event, count) => {
+    requireTrustedFrame(event)
+    const unreadCount = Math.max(0, Math.min(999999, Math.floor(Number(count) || 0)))
+    updateTaskbarNotificationOverlay(unreadCount)
+    return unreadCount
+  })
+  ipcMain.handle('notifications:show', (event, { title, body, route } = {}) => {
+    requireTrustedFrame(event)
+    return showWindowsNotification(title, body, route)
+  })
   ipcMain.handle('window:minimize', (event) => { requireTrustedFrame(event); BrowserWindow.fromWebContents(event.sender)?.minimize() })
   ipcMain.handle('window:toggle-maximize', (event) => {
     requireTrustedFrame(event)
@@ -580,8 +728,10 @@ function registerDownloadIpc() {
       updatedAt: new Date().toISOString(),
     }
     downloads.set(slug, item)
+    syncTray()
     try {
       await startTorrent(item)
+      syncTray()
       return { id: slug, downloads: getSnapshot() }
     } catch (error) {
       item.status = 'error'
@@ -602,11 +752,15 @@ function registerDownloadIpc() {
       // Keep the torrent and its in-progress piece buffers alive. Destroying it
       // here discards blocks that have not yet formed a complete verified piece.
       torrent.pause()
+      // pause() stops opening new requests, but outstanding peer requests can
+      // still arrive. Disconnect the current peers so Pause stops network I/O now.
+      for (const peer of [...(torrent._peers?.values?.() || [])]) torrent.removePeer(peer)
     }
     item.status = 'paused'
     item.speed = 0
     item.etaSeconds = null
     await saveAndPublish()
+    syncTray()
     return getSnapshot()
   })
   ipcMain.handle('downloads:resume', async (event, id) => {
@@ -623,6 +777,7 @@ function registerDownloadIpc() {
     } else {
       await startTorrent(item)
     }
+    syncTray()
     return getSnapshot()
   })
   ipcMain.handle('downloads:remove', async (event, { id, deleteFiles = false } = {}) => {
@@ -641,6 +796,7 @@ function registerDownloadIpc() {
     }
     downloads.delete(safeId)
     await saveAndPublish()
+    syncTray()
     return getSnapshot()
   })
   ipcMain.handle('downloads:open-folder', async (event, id) => {
