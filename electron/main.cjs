@@ -402,6 +402,26 @@ async function ensureTorrentClient() {
   return torrentClient
 }
 
+function pauseTorrentRequests(torrent) {
+  torrent.pause()
+  if (!torrent.ready || !torrent.pieces?.length) return
+
+  torrent.deselect(0, torrent.pieces.length - 1)
+  for (const wire of torrent.wires || []) {
+    for (const request of [...(wire.requests || [])]) {
+      wire.cancel(request.piece, request.offset, request.length)
+    }
+  }
+}
+
+function resumeTorrentRequests(torrent) {
+  if (torrent.destroyed) return
+  torrent.resume()
+  if (torrent.ready && torrent.pieces?.length && !torrent.done) {
+    torrent.select(0, torrent.pieces.length - 1)
+  }
+}
+
 function getSmoothedSpeed(torrent, item) {
   const now = Date.now()
   const previous = item.lastSample || { at: now, downloaded: torrent.downloaded || 0 }
@@ -473,6 +493,7 @@ async function startTorrent(item, { paused = false } = {}) {
     item.title = item.title || torrent.name || item.slug
   })
   torrent.on('ready', () => {
+    if (torrent.paused) pauseTorrentRequests(torrent)
     item.status = torrent.paused ? 'paused' : 'downloading'
     item.total = Number(torrent.length) || item.total
     item.title = item.title || torrent.name || item.slug
@@ -774,12 +795,9 @@ function registerDownloadIpc() {
       item.downloaded = Number(torrent.downloaded) || item.downloaded
       item.total = Number(torrent.length) || item.total
       item.progress = Number(torrent.progress) || item.progress
-      // Keep the torrent and its in-progress piece buffers alive. Destroying it
-      // here discards blocks that have not yet formed a complete verified piece.
-      torrent.pause()
-      // pause() stops opening new requests, but outstanding peer requests can
-      // still arrive. Disconnect the current peers so Pause stops network I/O now.
-      for (const peer of [...(torrent._peers?.values?.() || [])]) torrent.removePeer(peer)
+      // Keep peer connections and partial-piece buffers. Cancel outstanding
+      // requests so no more data is received until Resume reselects the files.
+      pauseTorrentRequests(torrent)
     }
     item.status = 'paused'
     item.speed = 0
@@ -794,7 +812,7 @@ function registerDownloadIpc() {
     if (!item) throw new Error('Download not found.')
     const torrent = activeTorrents.get(item.id)
     if (torrent && !torrent.destroyed) {
-      torrent.resume()
+      resumeTorrentRequests(torrent)
       item.status = 'downloading'
       item.error = ''
       item.updatedAt = new Date().toISOString()
