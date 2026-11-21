@@ -2,6 +2,9 @@
   "name": "gameonix-app",
   "private": true,
   "version": "1.0.0",
+  "author": {
+    "name": "Mahmoud Pro"
+  },
   "type": "module",
   "main": "electron/main.cjs",
   "description": "GameOnix desktop app with integrated torrent downloads",
