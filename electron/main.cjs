@@ -366,6 +366,7 @@ $lockPath = ${psString(lockPath)}
 $logPath = ${psString(updaterLogPath)}
 $stageDirectory = Join-Path $env:TEMP ('GameOnix-update-${version}-' + [guid]::NewGuid().ToString('N'))
 $installSucceeded = $false
+$launchAttempted = $false
 $ownsUpdateLock = $false
 $updateLock = $null
 function Write-UpdateLog([string]$message) {
@@ -392,14 +393,29 @@ try {
   $copyExitCode = $LASTEXITCODE
   Write-UpdateLog ('Robocopy finished with code ' + $copyExitCode + '.')
   if ($copyExitCode -ge 8) { throw ('Copying the update failed with robocopy code ' + $copyExitCode) }
+  foreach ($relativePath in @('GameOnix.exe', 'resources/app.asar')) {
+    $sourceFile = Join-Path $stageDirectory $relativePath
+    $installedFile = Join-Path $installDirectory $relativePath
+    if (-not (Test-Path -LiteralPath $sourceFile) -or -not (Test-Path -LiteralPath $installedFile)) { throw ('Update verification could not find ' + $relativePath) }
+    $sourceHash = (Get-FileHash -LiteralPath $sourceFile -Algorithm SHA256).Hash
+    $installedHash = (Get-FileHash -LiteralPath $installedFile -Algorithm SHA256).Hash
+    if ($sourceHash -ne $installedHash) { throw ('Installed ' + $relativePath + ' does not match the verified update.') }
+  }
   $installSucceeded = $true
-  Write-UpdateLog ('Update ' + '${version}' + ' installed. Restarting GameOnix.')
-  Start-Process -FilePath $executablePath -WorkingDirectory $installDirectory
+  Write-UpdateLog ('Update ' + '${version}' + ' verified in the app folder. Opening GameOnix.')
+  $updatedProcess = Start-Process -FilePath $executablePath -WorkingDirectory $installDirectory -PassThru -ErrorAction Stop
+  $launchAttempted = $true
+  Write-UpdateLog ('Opened updated GameOnix process ' + $updatedProcess.Id + '.')
 } catch {
   Write-UpdateLog ('Update failed: ' + $_.Exception.Message)
   $alreadyRunning = @(Get-Process -Name $processName -ErrorAction SilentlyContinue).Count -gt 0
-  if ((Test-Path -LiteralPath $executablePath) -and -not $alreadyRunning) { Start-Process -FilePath $executablePath -WorkingDirectory $installDirectory }
-  elseif ($alreadyRunning) { Write-UpdateLog 'GameOnix is already running; skipped fallback restart.' }
+  if ($installSucceeded -and -not $launchAttempted -and (Test-Path -LiteralPath $executablePath) -and -not $alreadyRunning) {
+    Start-Process -FilePath $executablePath -WorkingDirectory $installDirectory -ErrorAction SilentlyContinue
+  } elseif ($alreadyRunning) {
+    Write-UpdateLog 'GameOnix is already running; skipped fallback restart.'
+  } elseif (-not $installSucceeded) {
+    Write-UpdateLog 'The update was not verified; GameOnix was not restarted automatically.'
+  }
 } finally {
   Remove-Item -LiteralPath $stageDirectory -Recurse -Force -ErrorAction SilentlyContinue
   if ($updateLock) { $updateLock.Dispose() }
