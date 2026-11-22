@@ -239,6 +239,38 @@ function registerWindowsNotificationShortcut() {
   if (!shell.writeShortcutLink(shortcutPath, operation, details)) {
     throw new Error('Windows could not register the GameOnix notification shortcut.')
   }
+
+  // Portable releases are often moved from a versioned extraction folder into
+  // a stable folder such as D:\Programs\GameOnix. Repair existing user pins
+  // after the app is launched from the new location so they stop targeting the
+  // deleted extraction path and keep the same taskbar identity/icon.
+  const shortcutDirectories = [
+    app.getPath('desktop'),
+    path.join(app.getPath('appData'), 'Microsoft', 'Internet Explorer', 'Quick Launch', 'User Pinned', 'TaskBar'),
+    path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs'),
+  ]
+  for (const directory of shortcutDirectories) {
+    let entries = []
+    try { entries = fsSync.readdirSync(directory, { withFileTypes: true }) } catch { continue }
+    for (const entry of entries) {
+      if (!entry.isFile() || path.extname(entry.name).toLowerCase() !== '.lnk') continue
+      const existingPath = path.join(directory, entry.name)
+      try {
+        const existing = shell.readShortcutLink(existingPath)
+        const shortcutName = path.basename(entry.name, '.lnk').toLowerCase()
+        const targetName = path.basename(existing.target || '').toLowerCase()
+        if (shortcutName !== 'gameonix' && targetName !== 'gameonix.exe') continue
+        if (path.resolve(existing.target || '') === path.resolve(process.execPath) && existing.appUserModelId === APP_USER_MODEL_ID) continue
+        shell.writeShortcutLink(existingPath, 'update', {
+          ...existing,
+          ...details,
+          args: existing.args || '',
+        })
+      } catch (error) {
+        console.warn(`Could not repair GameOnix shortcut ${existingPath}:`, error.message)
+      }
+    }
+  }
 }
 
 function compareVersions(left, right) {
