@@ -326,26 +326,51 @@ async function launchPortableUpdater(archivePath, version) {
   const installDirectory = path.dirname(process.execPath)
   const executablePath = process.execPath
   const scriptPath = path.join(path.dirname(archivePath), 'install-gameonix-update.ps1')
+  const updaterLogPath = path.join(app.getPath('userData'), 'updater.log')
   const script = `
 $ErrorActionPreference = 'Stop'
 $processToWaitFor = ${Number(process.pid)}
 $installDirectory = ${psString(installDirectory)}
 $archivePath = ${psString(archivePath)}
 $executablePath = ${psString(executablePath)}
+$logPath = ${psString(updaterLogPath)}
 $stageDirectory = Join-Path $env:TEMP ('GameOnix-update-${version}-' + [guid]::NewGuid().ToString('N'))
-while (Get-Process -Id $processToWaitFor -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 400 }
+$installSucceeded = $false
+function Write-UpdateLog([string]$message) {
+  Add-Content -LiteralPath $logPath -Value ('[' + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + '] ' + $message) -ErrorAction SilentlyContinue
+}
 try {
+  Write-UpdateLog 'Waiting for GameOnix to close before applying the update.'
+  $deadline = [DateTime]::UtcNow.AddMinutes(2)
+  while ($true) {
+    $process = Get-Process -Id $processToWaitFor -ErrorAction SilentlyContinue
+    if (-not $process) { break }
+    try {
+      $processPath = $process.Path
+      if ($processPath -and ([IO.Path]::GetFullPath($processPath) -ine [IO.Path]::GetFullPath($executablePath))) { break }
+    } catch {}
+    if ([DateTime]::UtcNow -ge $deadline) { throw 'Timed out waiting for GameOnix to close.' }
+    Start-Sleep -Milliseconds 400
+  }
+  Write-UpdateLog ('Extracting update ' + '${version}' + '.')
   Expand-Archive -LiteralPath $archivePath -DestinationPath $stageDirectory -Force
-  $copyArguments = @(('"' + $stageDirectory + '"'), ('"' + $installDirectory + '"'), '/MIR', '/R:5', '/W:1')
-  $copy = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\\robocopy.exe') -ArgumentList $copyArguments -Wait -PassThru -WindowStyle Hidden
-  if ($copy.ExitCode -ge 8) { throw ('Copying the update failed with code ' + $copy.ExitCode) }
+  Write-UpdateLog ('Copying update files into ' + $installDirectory + '.')
+  $robocopy = Join-Path $env:SystemRoot 'System32\\robocopy.exe'
+  & $robocopy $stageDirectory $installDirectory /MIR /R:5 /W:1 /NFL /NDL /NJH /NJS
+  $copyExitCode = $LASTEXITCODE
+  if ($copyExitCode -ge 8) { throw ('Copying the update failed with robocopy code ' + $copyExitCode) }
+  $installSucceeded = $true
+  Write-UpdateLog ('Update ' + '${version}' + ' installed. Restarting GameOnix.')
   Start-Process -FilePath $executablePath -WorkingDirectory $installDirectory
 } catch {
+  Write-UpdateLog ('Update failed: ' + $_.Exception.Message)
   if (Test-Path -LiteralPath $executablePath) { Start-Process -FilePath $executablePath -WorkingDirectory $installDirectory }
 } finally {
   Remove-Item -LiteralPath $stageDirectory -Recurse -Force -ErrorAction SilentlyContinue
-  Remove-Item -LiteralPath $archivePath -Force -ErrorAction SilentlyContinue
-  Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
+  if ($installSucceeded) {
+    Remove-Item -LiteralPath $archivePath -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
+  }
 }
 `
   await fs.writeFile(scriptPath, script, 'utf8')
