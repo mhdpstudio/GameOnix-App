@@ -347,13 +347,66 @@ async function sha256File(filePath) {
   return hash.digest('hex').toLowerCase()
 }
 
+async function acquirePortableUpdateLock(lockPath, version) {
+  const createLock = async () => {
+    const handle = await fs.open(lockPath, 'wx')
+    try {
+      await handle.writeFile(JSON.stringify({ version, pid: process.pid, startedAt: new Date().toISOString() }))
+    } finally {
+      await handle.close()
+    }
+  }
+
+  try {
+    await createLock()
+    return
+  } catch (error) {
+    if (error?.code !== 'EEXIST') throw error
+  }
+
+  let probe
+  try {
+    probe = await fs.open(lockPath, 'r+')
+  } catch {
+    throw new Error('An update installer is already running. Please wait for it to finish.')
+  }
+
+  let lockInfo = {}
+  try {
+    lockInfo = JSON.parse(await probe.readFile('utf8'))
+  } catch {}
+  await probe.close()
+
+  let lockAge = 0
+  try { lockAge = Date.now() - (await fs.stat(lockPath)).mtimeMs } catch {}
+  const lockPid = Number(lockInfo.pid) || 0
+  let ownerIsRunning = false
+  if (lockPid > 0) {
+    try { process.kill(lockPid, 0); ownerIsRunning = true } catch (error) { ownerIsRunning = error?.code === 'EPERM' }
+  }
+
+  if (lockPid === process.pid || lockAge < 15000 || (ownerIsRunning && lockAge < 10 * 60 * 1000)) {
+    throw new Error('An update installer is already starting. Please wait a moment and try again.')
+  }
+
+  await fs.rm(lockPath, { force: true })
+  try {
+    await createLock()
+  } catch (error) {
+    if (error?.code === 'EEXIST') throw new Error('An update installer is already running. Please wait for it to finish.')
+    throw error
+  }
+}
+
 async function launchPortableUpdater(archivePath, version) {
   const installDirectory = path.dirname(process.execPath)
   const executablePath = process.execPath
   const updateDirectory = path.dirname(archivePath)
   const scriptPath = path.join(updateDirectory, 'install-gameonix-update.ps1')
+  const launcherScriptPath = path.join(updateDirectory, 'launch-gameonix-update.vbs')
   const lockPath = path.join(updateDirectory, 'installing.lock')
   const powershellPath = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+  const wscriptPath = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'wscript.exe')
   const updaterLogPath = path.join(app.getPath('userData'), 'updater.log')
   const script = `
 $ErrorActionPreference = 'Stop'
@@ -428,26 +481,21 @@ try {
   }
 }
 `
-  let lockHandle
-  try {
-    lockHandle = await fs.open(lockPath, 'wx')
-    await lockHandle.writeFile(JSON.stringify({ version, pid: process.pid, startedAt: new Date().toISOString() }))
-  } catch (error) {
-    if (error?.code === 'EEXIST') throw new Error('An update installer is already running. Please wait for it to finish.')
-    throw error
-  } finally {
-    await lockHandle?.close().catch(() => {})
-  }
+  await acquirePortableUpdateLock(lockPath, version)
   let launcherStarted = false
   try {
     await fs.writeFile(scriptPath, script, 'utf8')
+    const powershellCommand = [
+      `"${powershellPath}"`,
+      '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+      '-WindowStyle', 'Hidden', '-File', `"${scriptPath.replace(/"/g, '""')}"`,
+    ].join(' ')
+    const launcherScript = `Set updaterShell = CreateObject("WScript.Shell")\r\nupdaterShell.Run "${powershellCommand.replace(/"/g, '""')}", 0, False\r\n`
+    await fs.writeFile(launcherScriptPath, launcherScript, 'utf8')
     await new Promise((resolve, reject) => {
-      // Launch PowerShell directly as a detached hidden process. Avoid a .vbs
-      // launcher so Windows never asks the user to choose an app for it.
-      const child = spawn(powershellPath, [
-        '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
-        '-WindowStyle', 'Hidden', '-File', scriptPath,
-      ], {
+      // Windows Script Host detaches the installer from Electron's process
+      // lifetime so it can replace files after GameOnix exits.
+      const child = spawn(wscriptPath, [launcherScriptPath], {
         detached: true,
         stdio: 'ignore',
         windowsHide: true,
