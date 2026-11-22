@@ -29,7 +29,7 @@ function formatDuration(seconds) {
 }
 
 function statusLabel(status) {
-  return ({ selecting: "Choose files", starting: "Connecting", downloading: "Downloading", paused: "Paused", completed: "Complete", error: "Needs attention" })[status] || "Waiting";
+  return ({ selecting: "Choose files", starting: "Connecting", downloading: "Downloading", finalizing: "Finishing files", paused: "Paused", completed: "Complete", error: "Needs attention" })[status] || "Waiting";
 }
 
 function peerDiscoveryHint(item) {
@@ -76,7 +76,7 @@ export default function Downloads() {
     return unsubscribe;
   }, [desktop, refresh]);
 
-  const activeCount = useMemo(() => items.filter((item) => ["downloading", "starting"].includes(item.status)).length, [items]);
+  const activeCount = useMemo(() => items.filter((item) => ["downloading", "starting", "finalizing"].includes(item.status)).length, [items]);
   const completedCount = useMemo(() => items.filter((item) => item.status === "completed").length, [items]);
 
   async function runAction(id, action) {
@@ -122,12 +122,12 @@ export default function Downloads() {
         {item.error && <p className="download-card-error">{item.error}</p>}
         <div className="download-progress"><span style={{ width: `${percent}%` }} /></div>
         <div className="download-meta"><span>{formatBytes(item.downloaded)} of {item.total ? formatBytes(item.total) : "—"}</span><span><FontAwesomeIcon icon={faWifi} /> {item.peers} peers</span>{item.status === "downloading" && <span><FontAwesomeIcon icon={faArrowDown} /> {formatBytes(item.speed)}/s</span>}{item.status === "downloading" && <span><FontAwesomeIcon icon={faClock} /> {formatDuration(item.etaSeconds)}</span>}</div>
-        {!["paused", "completed", "error", "selecting"].includes(item.status) && peerDiscoveryHint(item) && <p className="download-peer-discovery">{peerDiscoveryHint(item)}</p>}
+        {!["paused", "completed", "finalizing", "error", "selecting"].includes(item.status) && peerDiscoveryHint(item) && <p className="download-peer-discovery">{peerDiscoveryHint(item)}</p>}
         <div className="download-card-actions">
           {item.status === "downloading" || item.status === "starting" ? <button type="button" onClick={() => void runAction(item.id, () => desktop.downloads.pause(item.id))} disabled={isBusy}><FontAwesomeIcon icon={faPause} /> Pause</button> : ["paused", "error"].includes(item.status) && <button type="button" className="is-primary" onClick={() => void runAction(item.id, () => desktop.downloads.resume(item.id))} disabled={isBusy}><FontAwesomeIcon icon={faPlay} /> Resume</button>}
           {item.status === "completed" && <button type="button" className="is-primary" onClick={() => void desktop.downloads.openFolder(item.id)}><FontAwesomeIcon icon={faFolderOpen} /> Open folder</button>}
           {item.status === "completed" && <span className="download-complete-label"><FontAwesomeIcon icon={faCheck} /> Ready</span>}
-          <button type="button" className="download-remove-button" onClick={() => void removeDownload(item)} disabled={isBusy}><FontAwesomeIcon icon={faTrash} /> Remove</button>
+          <button type="button" className="download-remove-button" onClick={() => void removeDownload(item)} disabled={isBusy || item.status === "finalizing"}><FontAwesomeIcon icon={faTrash} /> Remove</button>
         </div>
       </article>;
     })}</section>}

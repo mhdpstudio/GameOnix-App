@@ -31,6 +31,7 @@ const UPDATE_ASSET_NAME = 'GameOnix-win-unpacked.zip'
 const windows = new Set()
 const downloads = new Map()
 const activeTorrents = new Map()
+const finalizingTorrents = new Set()
 const speedSamples = new Map()
 let torrentClient
 let downloadDirectory
@@ -604,13 +605,58 @@ function getSmoothedSpeed(torrent, item) {
   return item.samples.reduce((sum, sample) => sum + sample.bytes, 0) / elapsed
 }
 
+function finalizeCompletedTorrent(item, torrent) {
+  if (!torrent || torrent.destroyed || finalizingTorrents.has(item.id)) return
+  finalizingTorrents.add(item.id)
+  const selectedFiles = (item.selectedFiles || []).map((index) => torrent.files?.[index]).filter(Boolean)
+  const total = selectedFiles.length
+    ? selectedFiles.reduce((sum, file) => sum + (Number(file.length) || 0), 0)
+    : Number(torrent.length) || Number(item.total) || 0
+  item.status = 'finalizing'
+  item.progress = 1
+  item.downloaded = total
+  item.total = total
+  item.speed = 0
+  item.etaSeconds = 0
+  item.updatedAt = new Date().toISOString()
+  if (torrent.bitfield?.buffer) item.bitfield = Buffer.from(torrent.bitfield.buffer).toString('base64')
+
+  syncTray()
+  void saveAndPublish()
+
+  // Close the store to release Windows file handles and flush final file sizes.
+  // destroyStore:false closes storage without deleting any downloaded files.
+  torrent.destroy({ destroyStore: false }, (error) => {
+    if (activeTorrents.get(item.id) === torrent) activeTorrents.delete(item.id)
+    finalizingTorrents.delete(item.id)
+    item.status = 'completed'
+    item.progress = 1
+    item.downloaded = total
+    item.total = total
+    item.speed = 0
+    item.etaSeconds = 0
+    item.peers = 0
+    item.updatedAt = new Date().toISOString()
+    if (!item.completionNotified) {
+      item.completionNotified = true
+      showWindowsNotification('Download Has been completed', `${item.title} has finished downloading.`, '/downloads')
+    }
+    if (error) {
+      item.error = 'The download is complete, but GameOnix could not release its file handles.'
+      console.error(`Could not close completed torrent files (${item.slug}):`, error)
+    }
+    void saveAndPublish()
+    syncTray()
+  })
+}
+
 function startStatsTimer() {
   if (downloadTimer) return
   downloadTimer = setInterval(() => {
     const now = Date.now()
     for (const [id, torrent] of activeTorrents) {
       const item = downloads.get(id)
-      if (!item || !torrent || torrent.destroyed) continue
+      if (!item || !torrent || torrent.destroyed || finalizingTorrents.has(id)) continue
       if (torrent.ready && now - (item.lastBitfieldCheckpointAt || 0) >= 10_000) {
         item.bitfield = Buffer.from(torrent.bitfield.buffer).toString('base64')
         item.lastBitfieldCheckpointAt = now
@@ -629,15 +675,7 @@ function startStatsTimer() {
       item.peers = Number(torrent.numPeers) || 0
       const selectedComplete = files.length > 0 && files.every((file) => file.done)
       if (selectedComplete) {
-        item.status = 'completed'
-        item.speed = 0
-        item.etaSeconds = 0
-        if (!item.completionNotified) {
-          item.completionNotified = true
-          pauseTorrentRequests(torrent)
-          showWindowsNotification('Download Has been completed', `${item.title} has finished downloading.`, '/downloads')
-          syncTray()
-        }
+        finalizeCompletedTorrent(item, torrent)
       } else item.status = item.status === 'selecting' ? 'selecting' : torrent.paused ? 'paused' : Number(torrent.numPeers) === 0 ? 'starting' : torrent.done ? 'completed' : 'downloading'
       item.etaSeconds = rawEta === null ? null : Number.isFinite(item.etaSeconds)
         ? item.etaSeconds * 0.72 + rawEta * 0.28
@@ -743,16 +781,7 @@ async function startTorrent(item, { paused = false } = {}) {
     void saveAndPublish()
   })
   torrent.on('done', () => {
-    item.status = 'completed'
-    item.progress = 1
-    item.downloaded = Number(torrent.length) || item.downloaded
-    item.total = Number(torrent.length) || item.total
-    item.speed = 0
-    item.etaSeconds = 0
-    void saveAndPublish()
-    if (!item.completionNotified) showWindowsNotification('Download Has been completed', `${item.title} has finished downloading.`, '/downloads')
-    item.completionNotified = true
-    syncTray()
+    finalizeCompletedTorrent(item, torrent)
   })
   torrent.on('error', (error) => {
     rejectTorrentReady(error)
@@ -816,7 +845,7 @@ function getMainWindow() {
 }
 
 function hasActiveDownloads() {
-  return [...downloads.values()].some((item) => item.status === 'downloading' || item.status === 'starting')
+  return [...downloads.values()].some((item) => ['downloading', 'starting', 'finalizing'].includes(item.status))
 }
 
 function hasHiddenWindow() {
