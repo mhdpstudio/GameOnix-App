@@ -32,6 +32,22 @@ function statusLabel(status) {
   return ({ selecting: "Choose files", starting: "Connecting", downloading: "Downloading", paused: "Paused", completed: "Complete", error: "Needs attention" })[status] || "Waiting";
 }
 
+function peerDiscoveryHint(item) {
+  if (item.peers > 0) return "";
+  if (item.discoveryWarning) return `Network notice: ${item.discoveryWarning}`;
+  const trackerCount = Number(item.trackerCount) || 0;
+  const lastTrackerResponse = item.trackerLastAnnounceAt
+    ? `Last tracker response ${new Date(item.trackerLastAnnounceAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}. `
+    : "";
+  if (item.privateTorrent) {
+    return `${lastTrackerResponse}${trackerCount ? `Checking ${trackerCount} listed trackers` : "Waiting for the torrent’s listed trackers"} for peers.`;
+  }
+  const methods = item.peerSearchSources?.length
+    ? item.peerSearchSources.map((source) => ({ tracker: "trackers", dht: "DHT", lsd: "local network", ut_pex: "peer exchange" })[source] || source).join(", ")
+    : "trackers, DHT, and peer exchange";
+  return `${lastTrackerResponse}Searching ${trackerCount || "available"} trackers and ${methods} for peers.`;
+}
+
 export default function Downloads() {
   const [items, setItems] = useState([]);
   const [folder, setFolder] = useState("");
@@ -106,6 +122,7 @@ export default function Downloads() {
         {item.error && <p className="download-card-error">{item.error}</p>}
         <div className="download-progress"><span style={{ width: `${percent}%` }} /></div>
         <div className="download-meta"><span>{formatBytes(item.downloaded)} of {item.total ? formatBytes(item.total) : "—"}</span><span><FontAwesomeIcon icon={faWifi} /> {item.peers} peers</span>{item.status === "downloading" && <span><FontAwesomeIcon icon={faArrowDown} /> {formatBytes(item.speed)}/s</span>}{item.status === "downloading" && <span><FontAwesomeIcon icon={faClock} /> {formatDuration(item.etaSeconds)}</span>}</div>
+        {!["paused", "completed", "error", "selecting"].includes(item.status) && peerDiscoveryHint(item) && <p className="download-peer-discovery">{peerDiscoveryHint(item)}</p>}
         <div className="download-card-actions">
           {item.status === "downloading" || item.status === "starting" ? <button type="button" onClick={() => void runAction(item.id, () => desktop.downloads.pause(item.id))} disabled={isBusy}><FontAwesomeIcon icon={faPause} /> Pause</button> : ["paused", "error"].includes(item.status) && <button type="button" className="is-primary" onClick={() => void runAction(item.id, () => desktop.downloads.resume(item.id))} disabled={isBusy}><FontAwesomeIcon icon={faPlay} /> Resume</button>}
           {item.status === "completed" && <button type="button" className="is-primary" onClick={() => void desktop.downloads.openFolder(item.id)}><FontAwesomeIcon icon={faFolderOpen} /> Open folder</button>}

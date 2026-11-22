@@ -31,6 +31,7 @@
 .is-completed .download-progress span { background: linear-gradient(90deg, #16a878, #58e0ac); }
 .download-meta { display: flex; flex-wrap: wrap; gap: 12px 20px; margin-top: 12px; color: #aaa5b8; font-size: 12px; }
 .download-meta span { display: inline-flex; align-items: center; gap: 6px; }
+.download-peer-discovery { margin: 9px 0 0; color: #a99acb; font-size: 11px; line-height: 1.55; }
 .download-card-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; margin-top: 18px; }
 .download-card-actions .is-primary, .downloads-empty a { border-color: #7955df; background: #6844ce; color: white; }
 .download-card-actions .download-remove-button { margin-left: auto; color: #b6aeba; }

@@ -15,6 +15,17 @@ const DEV_URL = 'http://localhost:5173'
 const APP_USER_MODEL_ID = 'com.gameonix.desktop'
 const TOAST_ACTIVATOR_CLSID = '{71C8C61D-96A7-40E2-AB8C-64CB4A4B6F13}'
 const TRUSTED_TORRENT_PREFIX = 'https://raw.githubusercontent.com/mhdpstudio/GameOnix-Data-Content/main/downloads/'
+const TRACKER_LIST_URL = 'https://raw.githubusercontent.com/ngosang/trackerslist/master/trackers_best.txt'
+const FALLBACK_TRACKERS = [
+  'udp://tracker.opentrackr.org:1337/announce',
+  'udp://open.stealth.si:80/announce',
+  'udp://tracker.torrent.eu.org:451/announce',
+  'udp://open.demonii.com:1337/announce',
+  'udp://open.tracker.cl:1337/announce',
+  'udp://exodus.desync.com:6969/announce',
+  'http://tracker.dler.org:6969/announce',
+  'http://tracker.renfei.net:8080/announce',
+]
 const UPDATE_REPOSITORY = 'mhdpstudio/GameOnix-App'
 const UPDATE_ASSET_NAME = 'GameOnix-win-unpacked.zip'
 const windows = new Set()
@@ -30,6 +41,7 @@ let downloadsPath
 let updateCheckPromise
 let updateDownloadPromise
 let updateCheckTimer
+let supplementalTrackersPromise
 let tray
 let isQuitting = false
 let shutdownInProgress = false
@@ -454,6 +466,13 @@ function publicDownload(item) {
     speed: Number(item.speed) || 0,
     etaSeconds: Number.isFinite(item.etaSeconds) ? item.etaSeconds : null,
     peers: Number(item.peers) || 0,
+    trackerCount: Number(item.trackerCount) || 0,
+    privateTorrent: Boolean(item.privateTorrent),
+    trackerLastAnnounceAt: item.trackerLastAnnounceAt || null,
+    dhtLastAnnounceAt: item.dhtLastAnnounceAt || null,
+    lastPeerConnectedAt: item.lastPeerConnectedAt || null,
+    peerSearchSources: Array.isArray(item.peerSearchSources) ? item.peerSearchSources : [],
+    discoveryWarning: item.discoveryWarning || '',
     error: item.error || '',
     files: Array.isArray(item.files) ? item.files.map((file, index) => ({ ...file, selected: (item.selectedFiles || []).includes(index) })) : [],
     selectedFiles: Array.isArray(item.selectedFiles) ? item.selectedFiles : [],
@@ -500,9 +519,51 @@ function requireTrustedFrame(event) {
 async function ensureTorrentClient() {
   if (torrentClient) return torrentClient
   const { default: WebTorrent } = await import('webtorrent')
-  torrentClient = new WebTorrent({ maxConns: 80 })
+  const announce = await loadSupplementalTrackers()
+  torrentClient = new WebTorrent({ maxConns: 160, tracker: { announce }, natUpnp: true, natPmp: true, utp: true, utPex: true, lsd: true })
   torrentClient.on('error', (error) => console.error('Torrent client error:', error))
   return torrentClient
+}
+
+function parseTrackerList(value) {
+  const trackers = String(value || '').split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => /^(udp|https?):\/\//i.test(line))
+    .filter((line) => {
+      try {
+        const url = new URL(line)
+        return ['udp:', 'http:', 'https:'].includes(url.protocol) && url.hostname && url.pathname.length < 180
+      } catch { return false }
+    })
+  return [...new Set(trackers)].slice(0, 20)
+}
+
+async function loadSupplementalTrackers() {
+  if (supplementalTrackersPromise) return supplementalTrackersPromise
+  supplementalTrackersPromise = (async () => {
+    const cachePath = path.join(app.getPath('userData'), 'public-trackers-cache.json')
+    let cachedTrackers = []
+    let cachedAt = 0
+    try {
+      const cache = JSON.parse(await fs.readFile(cachePath, 'utf8'))
+      cachedTrackers = parseTrackerList(Array.isArray(cache.trackers) ? cache.trackers.join('\n') : '')
+      cachedAt = Number(cache.savedAt) || 0
+    } catch {}
+    if (cachedTrackers.length && Date.now() - cachedAt < 24 * 60 * 60 * 1000) return cachedTrackers
+
+    try {
+      const response = await net.fetch(TRACKER_LIST_URL, { signal: AbortSignal.timeout(3500) })
+      if (!response.ok) throw new Error(`Tracker list returned ${response.status}.`)
+      const trackers = parseTrackerList(await response.text())
+      if (!trackers.length) throw new Error('Tracker list was empty.')
+      await fs.writeFile(cachePath, JSON.stringify({ savedAt: Date.now(), trackers }), 'utf8')
+      return trackers
+    } catch (error) {
+      console.warn('Could not refresh public tracker list; using cached/default trackers:', error.message)
+      return cachedTrackers.length ? cachedTrackers : FALLBACK_TRACKERS
+    }
+  })().finally(() => { supplementalTrackersPromise = null })
+  return supplementalTrackersPromise
 }
 
 function pauseTorrentRequests(torrent) {
@@ -614,6 +675,7 @@ async function startTorrent(item, { paused = false } = {}) {
     paused: paused && !pendingFileSelection,
     strategy: 'rarest',
     maxWebConns: 8,
+    noPeersIntervalTime: 15,
     destroyStoreOnDestroy: false,
     deselect: true,
     ...(savedBitfield ? { bitfield: savedBitfield } : {}),
@@ -628,9 +690,34 @@ async function startTorrent(item, { paused = false } = {}) {
   // A torrent can be prepared before the user confirms files; don't let that
   // intentionally pending promise surface as an unhandled rejection.
   torrent.gameOnixReady.catch(() => {})
+  item.peerSearchSources = []
+  item.discoveryWarning = ''
+  torrent.on('trackerAnnounce', () => {
+    item.trackerLastAnnounceAt = new Date().toISOString()
+    item.discoveryWarning = ''
+  })
+  torrent.on('dhtAnnounce', () => {
+    item.dhtLastAnnounceAt = new Date().toISOString()
+    item.discoveryWarning = ''
+  })
+  torrent.on('noPeers', (source) => {
+    const sources = new Set(item.peerSearchSources || [])
+    sources.add(String(source || 'unknown'))
+    item.peerSearchSources = [...sources]
+    item.lastPeerSearchAt = new Date().toISOString()
+  })
+  torrent.on('wire', () => {
+    item.lastPeerConnectedAt = new Date().toISOString()
+  })
+  torrent.on('warning', (error) => {
+    item.discoveryWarning = String(error?.message || error || 'Peer discovery warning').slice(0, 220)
+    console.warn(`Torrent discovery warning (${item.slug}):`, error)
+  })
   torrent.on('metadata', () => {
     item.total = Number(torrent.length) || item.total
     item.title = item.title || torrent.name || item.slug
+    item.privateTorrent = Boolean(torrent.private)
+    item.trackerCount = Array.isArray(torrent.announce) ? torrent.announce.length : 0
     item.files = (torrent.files || []).map((file) => ({ name: file.name, length: Number(file.length) || 0 }))
     if (!Array.isArray(item.selectedFiles)) item.selectedFiles = pendingFileSelection ? [] : torrent.files.map((_, index) => index)
   })
