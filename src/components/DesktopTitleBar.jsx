@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faArrowLeft, faArrowRight } from "@fortawesome/free-solid-svg-icons";
+import { faArrowLeft, faArrowRight, faArrowRotateRight } from "@fortawesome/free-solid-svg-icons";
 import "../style/desktop-titlebar.css";
 
 export default function DesktopTitleBar() {
@@ -35,6 +35,7 @@ export default function DesktopTitleBar() {
       <div className="desktop-titlebar-navigation">
         <button type="button" aria-label="Go back" title="Go back" onClick={() => desktop.windowControls.back()}><FontAwesomeIcon icon={faArrowLeft} /></button>
         <button type="button" aria-label="Go forward" title="Go forward" onClick={() => desktop.windowControls.forward()}><FontAwesomeIcon icon={faArrowRight} /></button>
+        <button type="button" aria-label="Reload page" title="Reload page" onClick={() => desktop.windowControls.reload()}><FontAwesomeIcon icon={faArrowRotateRight} /></button>
       </div>
       <img src="/gameonix-icon.png" alt="" />
       <span>GameOnix</span>

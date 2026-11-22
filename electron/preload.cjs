@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('gameonixDesktop', {
     },
     back: () => ipcRenderer.invoke('window:back'),
     forward: () => ipcRenderer.invoke('window:forward'),
+    reload: () => ipcRenderer.invoke('window:reload'),
   },
   updates: {
     getState: () => ipcRenderer.invoke('updates:get-state'),

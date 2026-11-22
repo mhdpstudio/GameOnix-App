@@ -1082,6 +1082,7 @@ function registerDownloadIpc() {
   ipcMain.handle('window:is-maximized', (event) => { requireTrustedFrame(event); return Boolean(BrowserWindow.fromWebContents(event.sender)?.isMaximized()) })
   ipcMain.handle('window:back', (event) => { requireTrustedFrame(event); const contents = event.sender; if (contents.canGoBack()) contents.goBack() })
   ipcMain.handle('window:forward', (event) => { requireTrustedFrame(event); const contents = event.sender; if (contents.canGoForward()) contents.goForward() })
+  ipcMain.handle('window:reload', (event) => { requireTrustedFrame(event); if (!event.sender.isDestroyed()) event.sender.reload() })
   ipcMain.handle('updates:get-state', (event) => { requireTrustedFrame(event); return { ...updaterState } })
   ipcMain.handle('updates:check', (event) => { requireTrustedFrame(event); return checkForUpdates() })
 
