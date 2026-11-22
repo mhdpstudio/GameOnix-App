@@ -353,6 +353,7 @@ async function launchPortableUpdater(archivePath, version) {
   const updateDirectory = path.dirname(archivePath)
   const scriptPath = path.join(updateDirectory, 'install-gameonix-update.ps1')
   const launcherScriptPath = path.join(updateDirectory, 'launch-gameonix-update.vbs')
+  const lockPath = path.join(updateDirectory, 'installing.lock')
   const powershellPath = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
   const updaterLogPath = path.join(app.getPath('userData'), 'updater.log')
   const script = `
@@ -363,15 +364,18 @@ $updateDirectory = ${psString(updateDirectory)}
 $archivePath = ${psString(archivePath)}
 $executablePath = ${psString(executablePath)}
 $launcherScriptPath = ${psString(launcherScriptPath)}
+$lockPath = ${psString(lockPath)}
 $logPath = ${psString(updaterLogPath)}
 $stageDirectory = Join-Path $env:TEMP ('GameOnix-update-${version}-' + [guid]::NewGuid().ToString('N'))
 $installSucceeded = $false
+$updateLock = $null
 function Write-UpdateLog([string]$message) {
   $logDirectory = Split-Path -Parent $logPath
   if (-not (Test-Path -LiteralPath $logDirectory)) { New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null }
   Add-Content -LiteralPath $logPath -Value ('[' + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + '] ' + $message) -ErrorAction SilentlyContinue
 }
 try {
+  $updateLock = [IO.File]::Open($lockPath, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
   Write-UpdateLog 'Waiting for GameOnix to close before applying the update.'
   $deadline = [DateTime]::UtcNow.AddMinutes(2)
   while ($true) {
@@ -400,6 +404,8 @@ try {
   if (Test-Path -LiteralPath $executablePath) { Start-Process -FilePath $executablePath -WorkingDirectory $installDirectory }
 } finally {
   Remove-Item -LiteralPath $stageDirectory -Recurse -Force -ErrorAction SilentlyContinue
+  if ($updateLock) { $updateLock.Dispose() }
+  Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
   if ($installSucceeded) {
     Remove-Item -LiteralPath $archivePath -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
@@ -408,6 +414,18 @@ try {
   }
 }
 `
+  let lockHandle
+  try {
+    lockHandle = await fs.open(lockPath, 'wx')
+    await lockHandle.writeFile(JSON.stringify({ version, pid: process.pid, startedAt: new Date().toISOString() }))
+  } catch (error) {
+    if (error?.code === 'EEXIST') throw new Error('An update installer is already running. Please wait for it to finish.')
+    throw error
+  } finally {
+    await lockHandle?.close().catch(() => {})
+  }
+  let launcherStarted = false
+  try {
   await fs.writeFile(scriptPath, script, 'utf8')
   const powershellCommand = [
     `"${powershellPath}"`,
@@ -427,9 +445,14 @@ try {
     child.once('error', reject)
     child.once('spawn', () => { child.unref(); resolve() })
   })
+  launcherStarted = true
   setUpdaterState({ status: 'restarting', progress: 100, availableVersion: version })
   isQuitting = true
   app.quit()
+  } catch (error) {
+    if (!launcherStarted) await fs.rm(lockPath, { force: true }).catch(() => {})
+    throw error
+  }
 }
 
 async function downloadAndInstallUpdate(asset, version) {
