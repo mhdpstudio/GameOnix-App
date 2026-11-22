@@ -734,9 +734,8 @@ async function restoreDownloads() {
 }
 
 function createWindow({ startHidden = false } = {}) {
-  // Use the PNG for the HWND/taskbar icon; keep the ICO for executable and
-  // shortcut resources, where Windows reads the embedded icon sizes directly.
-  const appIcon = nativeImage.createFromPath(getTrayIconPath())
+  const appIconPath = getAppIconPath()
+  const appIcon = nativeImage.createFromPath(appIconPath)
   const window = new BrowserWindow({
     width: 1460,
     height: 920,
@@ -744,7 +743,7 @@ function createWindow({ startHidden = false } = {}) {
     minHeight: 650,
     backgroundColor: '#0b0d12',
     frame: false,
-    icon: appIcon,
+    icon: appIconPath,
     autoHideMenuBar: true,
     show: false,
     webPreferences: {
@@ -755,16 +754,19 @@ function createWindow({ startHidden = false } = {}) {
       backgroundThrottling: false,
     },
   })
-  if (!appIcon.isEmpty()) window.setIcon(appIcon)
-  if (process.platform === 'win32') {
-    window.setAppDetails({
-      appId: APP_USER_MODEL_ID,
-      appIconPath: getAppIconPath(),
-      appIconIndex: 0,
-      relaunchCommand: `"${process.execPath}"`,
-      relaunchDisplayName: 'GameOnix',
-    })
+  const applyWindowsTaskbarIdentity = () => {
+    if (process.platform === 'win32') {
+      window.setAppDetails({
+        appId: APP_USER_MODEL_ID,
+        appIconPath,
+        appIconIndex: 0,
+        relaunchCommand: `"${process.execPath}"`,
+        relaunchDisplayName: 'GameOnix',
+      })
+    }
+    if (!appIcon.isEmpty()) window.setIcon(appIconPath)
   }
+  applyWindowsTaskbarIdentity()
   windows.add(window)
   updateTaskbarNotificationOverlay()
   const publishWindowState = () => {
@@ -773,12 +775,16 @@ function createWindow({ startHidden = false } = {}) {
   window.on('maximize', publishWindowState)
   window.on('unmaximize', publishWindowState)
   window.once('ready-to-show', () => {
+    // Reapply the ICO after Windows creates the native HWND; this refreshes
+    // both the title-bar and taskbar button icons for frameless windows.
+    applyWindowsTaskbarIdentity()
     if (startHidden) {
       window.maximize()
       return
     }
     window.show()
     window.maximize()
+    applyWindowsTaskbarIdentity()
   })
   window.on('close', (event) => {
     if (isQuitting || (!appSettings.closeToTray && !hasActiveDownloads())) return
