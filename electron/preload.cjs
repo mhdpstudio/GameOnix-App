@@ -25,6 +25,8 @@ contextBridge.exposeInMainWorld('gameonixDesktop', {
   updates: {
     getState: () => ipcRenderer.invoke('updates:get-state'),
     check: () => ipcRenderer.invoke('updates:check'),
+    defer: () => ipcRenderer.invoke('updates:defer'),
+    restart: () => ipcRenderer.invoke('updates:restart'),
     onStateChange: (callback) => {
       const listener = (_event, state) => callback(state)
       ipcRenderer.on('updates:state', listener)

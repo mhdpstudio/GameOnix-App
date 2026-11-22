@@ -11,6 +11,7 @@ import "./style/sidebar-style.css";
 
 import App from "./App.jsx";
 import DesktopTitleBar from "./components/DesktopTitleBar.jsx";
+import UpdateRestartPrompt from "./components/UpdateRestartPrompt.jsx";
 
 if (window.gameonixDesktop) document.documentElement.classList.add("gameonix-desktop");
 
@@ -30,6 +31,7 @@ createRoot(document.getElementById("root")).render(
   <StrictMode>
     <Router>
       <DesktopTitleBar />
+      <UpdateRestartPrompt />
       <ScrollToTop />
       <App />
     </Router>

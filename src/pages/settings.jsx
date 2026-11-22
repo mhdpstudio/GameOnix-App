@@ -17,6 +17,8 @@ const UPDATE_LABELS = {
   current: "You're using the latest version",
   available: "A new version is available",
   downloading: "Downloading the update in GameOnix",
+  ready: "Update ready to install",
+  deferred: "Update ready — restart when you're finished",
   restarting: "Restarting to finish installing the update…",
   error: "Couldn't check or install the update",
   development: "Updates are available in the installed desktop app",
@@ -84,6 +86,18 @@ export default function Settings() {
     }
   }
 
+  async function restartForUpdate() {
+    setBusy("restart-update");
+    setError("");
+    try {
+      setUpdate(await desktop.updates.restart());
+    } catch (reason) {
+      setError(reason?.message || "Couldn't restart to install the update.");
+    } finally {
+      setBusy("");
+    }
+  }
+
   if (!desktop) return <main className="settings-page"><section className="settings-panel settings-web-fallback"><h1>Desktop settings</h1><p>These options are available in GameOnix Desktop.</p><Link to="/">Back to GameOnix</Link></section></main>;
 
   const updateStatus = update?.status || "idle";
@@ -109,9 +123,9 @@ export default function Settings() {
     <section className="settings-panel" aria-labelledby="settings-updates-title">
       <header className="settings-panel-heading"><span><FontAwesomeIcon icon={faRocket} /></span><div><h2 id="settings-updates-title">Updates</h2><p>GameOnix checks its public GitHub release feed automatically.</p></div></header>
       <div className="settings-update-version"><div className="settings-version-mark"><FontAwesomeIcon icon={faLaptop} /></div><div><strong>GameOnix Desktop</strong><span>Installed version {settings?.version || "…"}</span></div><span className={`settings-update-badge is-${updateStatus}`}>{updateStatus === "current" ? <FontAwesomeIcon icon={faCheck} /> : <FontAwesomeIcon icon={faBell} />}{UPDATE_LABELS[updateStatus] || "Update status"}</span></div>
-      {updateStatus === "downloading" && <div className="settings-update-progress"><div><span>Downloading version {update?.availableVersion}</span><strong>{progress}%</strong></div><div className="settings-progress-track"><span style={{ width: `${progress}%` }} /></div><small>The files are downloaded inside GameOnix. The app closes, updates its portable files, then restarts automatically.</small></div>}
+      {updateStatus === "downloading" && <div className="settings-update-progress"><div><span>Downloading version {update?.availableVersion}</span><strong>{progress}%</strong></div><div className="settings-progress-track"><span style={{ width: `${progress}%` }} /></div><small>The update downloads inside GameOnix. When it is ready, choose whether to restart now or later.</small></div>}
       {updateStatus === "error" && <p className="settings-update-error">{update?.error}</p>}
-      <div className="settings-update-actions"><button type="button" className="settings-secondary-button" onClick={() => void checkUpdates()} disabled={settingsBusy || ["downloading", "restarting"].includes(updateStatus)}><FontAwesomeIcon icon={faArrowRotateRight} />{busy === "updates" ? "Checking…" : "Check for updates"}</button><span>Updates install into your GameOnix folder and restart automatically.</span></div>
+      <div className="settings-update-actions"><button type="button" className="settings-secondary-button" onClick={() => void checkUpdates()} disabled={settingsBusy || ["downloading", "restarting", "ready", "deferred"].includes(updateStatus)}><FontAwesomeIcon icon={faArrowRotateRight} />{busy === "updates" ? "Checking…" : "Check for updates"}</button>{["ready", "deferred"].includes(updateStatus) && <button type="button" className="settings-secondary-button" onClick={() => void restartForUpdate()} disabled={settingsBusy}><FontAwesomeIcon icon={faArrowRotateRight} />{busy === "restart-update" ? "Restarting…" : "Restart now"}</button>}<span>Choose when to restart after an update is ready.</span></div>
     </section>
   </main>;
 }

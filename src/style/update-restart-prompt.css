@@ -1,0 +1,109 @@
+.update-restart-overlay {
+  position: fixed;
+  z-index: 12000;
+  inset: 36px 0 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(5 5 10 / 76%);
+  backdrop-filter: blur(7px);
+}
+
+.update-restart-dialog {
+  width: min(100%, 470px);
+  padding: 30px;
+  border: 1px solid #493878;
+  border-radius: 20px;
+  background: linear-gradient(145deg, #1b1725, #111116 72%);
+  box-shadow: 0 28px 90px rgb(0 0 0 / 55%), 0 0 45px rgb(120 82 230 / 12%);
+  color: #f6f3ff;
+}
+
+.update-restart-icon {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  margin-bottom: 20px;
+  place-items: center;
+  border: 1px solid #6549a7;
+  border-radius: 15px;
+  background: #29203e;
+  color: #b49aff;
+}
+
+.update-restart-eyebrow {
+  color: #a885ff;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .16em;
+}
+
+.update-restart-dialog h2 {
+  margin: 9px 0 8px;
+  font-size: 24px;
+  letter-spacing: -.035em;
+}
+
+.update-restart-dialog > p {
+  margin: 0;
+  color: #aaa4b8;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.update-restart-dialog .update-restart-error {
+  margin-top: 12px;
+  color: #ff9a9a;
+}
+
+.update-restart-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 25px;
+}
+
+.update-restart-actions button {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 15px;
+  border: 1px solid #393443;
+  border-radius: 11px;
+  background: #1a1820;
+  color: #e9e4f5;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 750;
+  transition: border-color .16s ease, background .16s ease, transform .16s ease;
+}
+
+.update-restart-actions button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: #7557c5;
+}
+
+.update-restart-actions .update-restart-now {
+  border-color: #7652dc;
+  background: linear-gradient(115deg, #6948d2, #885ff2);
+  color: white;
+}
+
+.update-restart-actions .update-restart-now:hover:not(:disabled) {
+  background: linear-gradient(115deg, #7958e4, #966fff);
+}
+
+.update-restart-actions button:disabled {
+  cursor: wait;
+  opacity: .65;
+}
+
+@media (max-width: 520px) {
+  .update-restart-dialog { padding: 24px; }
+  .update-restart-dialog h2 { font-size: 21px; }
+  .update-restart-actions { flex-direction: column-reverse; }
+  .update-restart-actions button { width: 100%; }
+}

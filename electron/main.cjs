@@ -42,6 +42,8 @@ let downloadsPath
 let updateCheckPromise
 let updateDownloadPromise
 let updateCheckTimer
+let pendingPortableUpdate
+let deferredUpdateVersion = ''
 let supplementalTrackersPromise
 let tray
 let isQuitting = false
@@ -312,6 +314,10 @@ async function checkForUpdates() {
         setUpdaterState({ status: 'current', currentVersion: app.getVersion(), availableVersion: '', progress: 0, error: '' })
         return updaterState
       }
+      if (deferredUpdateVersion === version && pendingPortableUpdate?.version === version) {
+        setUpdaterState({ status: 'deferred', availableVersion: version, progress: 100, error: '' })
+        return updaterState
+      }
       const asset = release.assets?.find((item) => item.name === UPDATE_ASSET_NAME)
       if (!asset?.browser_download_url) throw new Error('The latest release is missing the portable app archive.')
       if (!asset.browser_download_url.startsWith(`https://github.com/${UPDATE_REPOSITORY}/releases/download/`)) {
@@ -474,7 +480,8 @@ async function downloadAndInstallUpdate(asset, version) {
         if (hash.digest('hex').toLowerCase() !== expectedDigest) throw new Error('The update archive failed its SHA-256 integrity check.')
         await fs.rename(partialArchivePath, archivePath)
       }
-      await launchPortableUpdater(archivePath, version)
+      pendingPortableUpdate = { archivePath, version }
+      setUpdaterState({ status: 'ready', progress: 100, availableVersion: version, error: '' })
     } catch (error) {
       await fs.rm(partialArchivePath, { force: true }).catch(() => {})
       setUpdaterState({ status: 'error', error: error?.message || 'The update could not be installed.' })
@@ -1094,6 +1101,27 @@ function registerDownloadIpc() {
   ipcMain.handle('window:reload', (event) => { requireTrustedFrame(event); if (!event.sender.isDestroyed()) event.sender.reload() })
   ipcMain.handle('updates:get-state', (event) => { requireTrustedFrame(event); return { ...updaterState } })
   ipcMain.handle('updates:check', (event) => { requireTrustedFrame(event); return checkForUpdates() })
+  ipcMain.handle('updates:defer', (event) => {
+    requireTrustedFrame(event)
+    if (!pendingPortableUpdate) throw new Error('There is no downloaded update ready to install.')
+    deferredUpdateVersion = pendingPortableUpdate.version
+    setUpdaterState({ status: 'deferred', progress: 100, availableVersion: deferredUpdateVersion, error: '' })
+    return { ...updaterState }
+  })
+  ipcMain.handle('updates:restart', async (event) => {
+    requireTrustedFrame(event)
+    if (!pendingPortableUpdate) throw new Error('There is no downloaded update ready to install.')
+    const update = pendingPortableUpdate
+    try {
+      await launchPortableUpdater(update.archivePath, update.version)
+      pendingPortableUpdate = null
+      deferredUpdateVersion = ''
+      return { ...updaterState }
+    } catch (error) {
+      setUpdaterState({ status: 'error', error: error?.message || 'The update could not be installed.' })
+      throw error
+    }
+  })
 
   ipcMain.handle('settings:get', (event) => {
     requireTrustedFrame(event)
