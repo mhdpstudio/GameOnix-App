@@ -734,7 +734,9 @@ async function restoreDownloads() {
 }
 
 function createWindow({ startHidden = false } = {}) {
-  const appIcon = nativeImage.createFromPath(getAppIconPath())
+  // Use the PNG for the HWND/taskbar icon; keep the ICO for executable and
+  // shortcut resources, where Windows reads the embedded icon sizes directly.
+  const appIcon = nativeImage.createFromPath(getTrayIconPath())
   const window = new BrowserWindow({
     width: 1460,
     height: 920,
