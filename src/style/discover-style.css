@@ -1063,6 +1063,30 @@
   background: linear-gradient(160deg, #14141d, #101117 72%);
   border-color: rgba(167, 139, 250, 0.16);
   box-shadow: 0 16px 38px rgba(0, 0, 0, 0.16);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(167, 139, 250, 0.48) transparent;
+}
+
+.discover-results-layout > .discover-filters::-webkit-scrollbar {
+  width: 6px;
+}
+
+.discover-results-layout > .discover-filters::-webkit-scrollbar-track {
+  margin: 12px 0;
+  background: transparent;
+}
+
+.discover-results-layout > .discover-filters::-webkit-scrollbar-thumb {
+  min-height: 36px;
+  background: rgba(167, 139, 250, 0.42);
+  border: 1px solid transparent;
+  border-radius: 99px;
+  background-clip: padding-box;
+}
+
+.discover-results-layout > .discover-filters::-webkit-scrollbar-thumb:hover {
+  background: rgba(190, 167, 255, 0.75);
+  background-clip: padding-box;
 }
 
 .discover-filter-heading {
