@@ -163,6 +163,36 @@ function Discover() {
           </span>
         </div>
 
+        <div className="discover-results-layout">
+          <aside className="discover-filters" aria-label="Filter games">
+            <div className="discover-filter-heading">
+              <div>
+                <span className="discover-filter-label">YOUR LIBRARY</span>
+                <strong>Refine results</strong>
+              </div>
+              <FontAwesomeIcon icon={faSliders} />
+            </div>
+
+            <div className="discover-filter-group">
+              <span className="discover-filter-label">PLATFORM</span>
+              <div className="discover-filter-options">
+                <button type="button" className={selectedPlatform === "all" ? "active" : ""} onClick={() => setSelectedPlatform("all")}>All platforms</button>
+                {platforms.map((platform) => <button type="button" key={platform.id} className={selectedPlatform === platform.id ? "active" : ""} onClick={() => setSelectedPlatform(platform.id)}>{platform.label}</button>)}
+              </div>
+            </div>
+
+            <div className="discover-filter-group">
+              <span className="discover-filter-label">GENRE</span>
+              <div className="discover-filter-options">
+                <button type="button" className={selectedGenre === "all" ? "active" : ""} onClick={() => setSelectedGenre("all")}>All genres</button>
+                {genres.map((genre) => <button type="button" key={genre} className={selectedGenre === genre ? "active" : ""} onClick={() => setSelectedGenre(genre)}>{genre}</button>)}
+              </div>
+            </div>
+
+            {hasActiveFilters && <button type="button" className="discover-clear-filters" onClick={clearFilters}><FontAwesomeIcon icon={faXmark} /> Clear all filters</button>}
+          </aside>
+
+          <div className="discover-results-content">
         <div className="discover-toolbar">
           <label className="discover-search">
             <FontAwesomeIcon icon={faMagnifyingGlass} />
@@ -198,71 +228,6 @@ function Discover() {
               ))}
             </div>}
           </div>
-        </div>
-
-        <div className="discover-filters">
-          <div className="discover-filter-group">
-            <span className="discover-filter-label">PLATFORM</span>
-
-            <div className="discover-filter-options">
-              <button
-                type="button"
-                className={selectedPlatform === "all" ? "active" : ""}
-                onClick={() => setSelectedPlatform("all")}
-              >
-                All platforms
-              </button>
-
-              {platforms.map((platform) => (
-                <button
-                  type="button"
-                  key={platform.id}
-                  className={
-                    selectedPlatform === platform.id ? "active" : ""
-                  }
-                  onClick={() => setSelectedPlatform(platform.id)}
-                >
-                  {platform.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="discover-filter-group">
-            <span className="discover-filter-label">GENRE</span>
-
-            <div className="discover-filter-options">
-              <button
-                type="button"
-                className={selectedGenre === "all" ? "active" : ""}
-                onClick={() => setSelectedGenre("all")}
-              >
-                All genres
-              </button>
-
-              {genres.map((genre) => (
-                <button
-                  type="button"
-                  key={genre}
-                  className={selectedGenre === genre ? "active" : ""}
-                  onClick={() => setSelectedGenre(genre)}
-                >
-                  {genre}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {hasActiveFilters && (
-            <button
-              type="button"
-              className="discover-clear-filters"
-              onClick={clearFilters}
-            >
-              <FontAwesomeIcon icon={faXmark} />
-              Clear filters
-            </button>
-          )}
         </div>
 
         {loading ? (
@@ -301,6 +266,8 @@ function Discover() {
             ))}
           </div>
         )}
+          </div>
+        </div>
       </section>
     </main>
   );
