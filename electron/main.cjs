@@ -349,6 +349,8 @@ $logPath = ${psString(updaterLogPath)}
 $stageDirectory = Join-Path $env:TEMP ('GameOnix-update-${version}-' + [guid]::NewGuid().ToString('N'))
 $installSucceeded = $false
 function Write-UpdateLog([string]$message) {
+  $logDirectory = Split-Path -Parent $logPath
+  if (-not (Test-Path -LiteralPath $logDirectory)) { New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null }
   Add-Content -LiteralPath $logPath -Value ('[' + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + '] ' + $message) -ErrorAction SilentlyContinue
 }
 try {
@@ -368,8 +370,9 @@ try {
   Expand-Archive -LiteralPath $archivePath -DestinationPath $stageDirectory -Force
   Write-UpdateLog ('Copying update files into ' + $installDirectory + '.')
   $robocopy = Join-Path $env:SystemRoot 'System32\\robocopy.exe'
-  & $robocopy $stageDirectory $installDirectory /MIR /R:5 /W:1 /NFL /NDL /NJH /NJS
+  & $robocopy $stageDirectory $installDirectory /E /R:5 /W:1 /NFL /NDL /NJH /NJS
   $copyExitCode = $LASTEXITCODE
+  Write-UpdateLog ('Robocopy finished with code ' + $copyExitCode + '.')
   if ($copyExitCode -ge 8) { throw ('Copying the update failed with robocopy code ' + $copyExitCode) }
   $installSucceeded = $true
   Write-UpdateLog ('Update ' + '${version}' + ' installed. Restarting GameOnix.')
@@ -387,7 +390,11 @@ try {
 `
   await fs.writeFile(scriptPath, script, 'utf8')
   await new Promise((resolve, reject) => {
-    const child = spawn('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath], {
+    // Start a second PowerShell process through Start-Process. The first
+    // process only launches it, so the installer is independent of Electron
+    // shutting down and remains alive while replacing the app files.
+    const launcher = `Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', ${psString(scriptPath)}) -WindowStyle Hidden`
+    const child = spawn('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', launcher], {
       detached: true,
       stdio: 'ignore',
       windowsHide: true,
