@@ -346,6 +346,8 @@ async function launchPortableUpdater(archivePath, version) {
   const executablePath = process.execPath
   const updateDirectory = path.dirname(archivePath)
   const scriptPath = path.join(updateDirectory, 'install-gameonix-update.ps1')
+  const launcherScriptPath = path.join(updateDirectory, 'launch-gameonix-update.vbs')
+  const powershellPath = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
   const updaterLogPath = path.join(app.getPath('userData'), 'updater.log')
   const script = `
 $ErrorActionPreference = 'Stop'
@@ -354,6 +356,7 @@ $installDirectory = ${psString(installDirectory)}
 $updateDirectory = ${psString(updateDirectory)}
 $archivePath = ${psString(archivePath)}
 $executablePath = ${psString(executablePath)}
+$launcherScriptPath = ${psString(launcherScriptPath)}
 $logPath = ${psString(updaterLogPath)}
 $stageDirectory = Join-Path $env:TEMP ('GameOnix-update-${version}-' + [guid]::NewGuid().ToString('N'))
 $installSucceeded = $false
@@ -394,17 +397,23 @@ try {
   if ($installSucceeded) {
     Remove-Item -LiteralPath $archivePath -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $launcherScriptPath -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $updateDirectory -Force -ErrorAction SilentlyContinue
   }
 }
 `
   await fs.writeFile(scriptPath, script, 'utf8')
+  const powershellCommand = [
+    `"${powershellPath}"`,
+    '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+    '-File', `"${scriptPath.replace(/"/g, '""')}"`,
+  ].join(' ')
+  const launcherScript = `Set updaterShell = CreateObject("WScript.Shell")\r\nupdaterShell.Run "${powershellCommand.replace(/"/g, '""')}", 0, False\r\n`
+  await fs.writeFile(launcherScriptPath, launcherScript, 'utf8')
   await new Promise((resolve, reject) => {
-    // Start a second PowerShell process through Start-Process. The first
-    // process only launches it, so the installer is independent of Electron
-    // shutting down and remains alive while replacing the app files.
-    const launcher = `Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', ${psString(scriptPath)}) -WindowStyle Hidden`
-    const child = spawn('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', launcher], {
+    // Windows Script Host starts the installer as an independent hidden
+    // process, so it survives Electron exiting before it replaces app files.
+    const child = spawn('wscript.exe', [launcherScriptPath], {
       detached: true,
       stdio: 'ignore',
       windowsHide: true,
