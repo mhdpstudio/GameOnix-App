@@ -1049,7 +1049,11 @@
 
 .discover-results-layout > .discover-filters {
   position: sticky;
-  top: 18px;
+  top: calc(var(--topbar-height, 63px) + 14px);
+  align-self: start;
+  max-height: calc(100dvh - var(--topbar-height, 63px) - 28px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   grid-column: 2;
   grid-row: 1;
   display: flex;
@@ -1143,7 +1147,6 @@
   .discover-results-content,
   .discover-results-layout > .discover-filters {
     grid-column: 1;
-    position: static;
   }
 
   .discover-results-layout > .discover-filters {
