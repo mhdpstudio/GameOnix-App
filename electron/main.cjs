@@ -352,22 +352,21 @@ async function launchPortableUpdater(archivePath, version) {
   const executablePath = process.execPath
   const updateDirectory = path.dirname(archivePath)
   const scriptPath = path.join(updateDirectory, 'install-gameonix-update.ps1')
-  const launcherScriptPath = path.join(updateDirectory, 'launch-gameonix-update.vbs')
   const lockPath = path.join(updateDirectory, 'installing.lock')
   const powershellPath = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
   const updaterLogPath = path.join(app.getPath('userData'), 'updater.log')
   const script = `
 $ErrorActionPreference = 'Stop'
-$processToWaitFor = ${Number(process.pid)}
 $installDirectory = ${psString(installDirectory)}
+$processName = [IO.Path]::GetFileNameWithoutExtension(${psString(executablePath)})
 $updateDirectory = ${psString(updateDirectory)}
 $archivePath = ${psString(archivePath)}
 $executablePath = ${psString(executablePath)}
-$launcherScriptPath = ${psString(launcherScriptPath)}
 $lockPath = ${psString(lockPath)}
 $logPath = ${psString(updaterLogPath)}
 $stageDirectory = Join-Path $env:TEMP ('GameOnix-update-${version}-' + [guid]::NewGuid().ToString('N'))
 $installSucceeded = $false
+$ownsUpdateLock = $false
 $updateLock = $null
 function Write-UpdateLog([string]$message) {
   $logDirectory = Split-Path -Parent $logPath
@@ -376,15 +375,12 @@ function Write-UpdateLog([string]$message) {
 }
 try {
   $updateLock = [IO.File]::Open($lockPath, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
-  Write-UpdateLog 'Waiting for GameOnix to close before applying the update.'
+  $ownsUpdateLock = $true
+  Write-UpdateLog 'Waiting for all GameOnix processes to close before applying the update.'
   $deadline = [DateTime]::UtcNow.AddMinutes(2)
   while ($true) {
-    $process = Get-Process -Id $processToWaitFor -ErrorAction SilentlyContinue
-    if (-not $process) { break }
-    try {
-      $processPath = $process.Path
-      if ($processPath -and ([IO.Path]::GetFullPath($processPath) -ine [IO.Path]::GetFullPath($executablePath))) { break }
-    } catch {}
+    $runningProcesses = @(Get-Process -Name $processName -ErrorAction SilentlyContinue)
+    if ($runningProcesses.Count -eq 0) { break }
     if ([DateTime]::UtcNow -ge $deadline) { throw 'Timed out waiting for GameOnix to close.' }
     Start-Sleep -Milliseconds 400
   }
@@ -401,15 +397,17 @@ try {
   Start-Process -FilePath $executablePath -WorkingDirectory $installDirectory
 } catch {
   Write-UpdateLog ('Update failed: ' + $_.Exception.Message)
-  if (Test-Path -LiteralPath $executablePath) { Start-Process -FilePath $executablePath -WorkingDirectory $installDirectory }
+  $alreadyRunning = @(Get-Process -Name $processName -ErrorAction SilentlyContinue).Count -gt 0
+  if ((Test-Path -LiteralPath $executablePath) -and -not $alreadyRunning) { Start-Process -FilePath $executablePath -WorkingDirectory $installDirectory }
+  elseif ($alreadyRunning) { Write-UpdateLog 'GameOnix is already running; skipped fallback restart.' }
 } finally {
   Remove-Item -LiteralPath $stageDirectory -Recurse -Force -ErrorAction SilentlyContinue
   if ($updateLock) { $updateLock.Dispose() }
-  Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
+  if ($ownsUpdateLock) { Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue }
+  Remove-Item -LiteralPath (Join-Path $updateDirectory 'launch-gameonix-update.vbs') -Force -ErrorAction SilentlyContinue
   if ($installSucceeded) {
     Remove-Item -LiteralPath $archivePath -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $launcherScriptPath -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $updateDirectory -Force -ErrorAction SilentlyContinue
   }
 }
@@ -426,29 +424,25 @@ try {
   }
   let launcherStarted = false
   try {
-  await fs.writeFile(scriptPath, script, 'utf8')
-  const powershellCommand = [
-    `"${powershellPath}"`,
-    '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
-    '-File', `"${scriptPath.replace(/"/g, '""')}"`,
-  ].join(' ')
-  const launcherScript = `Set updaterShell = CreateObject("WScript.Shell")\r\nupdaterShell.Run "${powershellCommand.replace(/"/g, '""')}", 0, False\r\n`
-  await fs.writeFile(launcherScriptPath, launcherScript, 'utf8')
-  await new Promise((resolve, reject) => {
-    // Windows Script Host starts the installer as an independent hidden
-    // process, so it survives Electron exiting before it replaces app files.
-    const child = spawn('wscript.exe', [launcherScriptPath], {
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: true,
+    await fs.writeFile(scriptPath, script, 'utf8')
+    await new Promise((resolve, reject) => {
+      // Launch PowerShell directly as a detached hidden process. Avoid a .vbs
+      // launcher so Windows never asks the user to choose an app for it.
+      const child = spawn(powershellPath, [
+        '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+        '-WindowStyle', 'Hidden', '-File', scriptPath,
+      ], {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true,
+      })
+      child.once('error', reject)
+      child.once('spawn', () => { child.unref(); resolve() })
     })
-    child.once('error', reject)
-    child.once('spawn', () => { child.unref(); resolve() })
-  })
-  launcherStarted = true
-  setUpdaterState({ status: 'restarting', progress: 100, availableVersion: version })
-  isQuitting = true
-  app.quit()
+    launcherStarted = true
+    setUpdaterState({ status: 'restarting', progress: 100, availableVersion: version })
+    isQuitting = true
+    app.quit()
   } catch (error) {
     if (!launcherStarted) await fs.rm(lockPath, { force: true }).catch(() => {})
     throw error
