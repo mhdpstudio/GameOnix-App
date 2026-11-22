@@ -335,15 +335,23 @@ function psString(value) {
   return `'${String(value).replace(/'/g, "''")}'`
 }
 
+async function sha256File(filePath) {
+  const hash = crypto.createHash('sha256')
+  for await (const chunk of fsSync.createReadStream(filePath)) hash.update(chunk)
+  return hash.digest('hex').toLowerCase()
+}
+
 async function launchPortableUpdater(archivePath, version) {
   const installDirectory = path.dirname(process.execPath)
   const executablePath = process.execPath
-  const scriptPath = path.join(path.dirname(archivePath), 'install-gameonix-update.ps1')
+  const updateDirectory = path.dirname(archivePath)
+  const scriptPath = path.join(updateDirectory, 'install-gameonix-update.ps1')
   const updaterLogPath = path.join(app.getPath('userData'), 'updater.log')
   const script = `
 $ErrorActionPreference = 'Stop'
 $processToWaitFor = ${Number(process.pid)}
 $installDirectory = ${psString(installDirectory)}
+$updateDirectory = ${psString(updateDirectory)}
 $archivePath = ${psString(archivePath)}
 $executablePath = ${psString(executablePath)}
 $logPath = ${psString(updaterLogPath)}
@@ -386,6 +394,7 @@ try {
   if ($installSucceeded) {
     Remove-Item -LiteralPath $archivePath -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $updateDirectory -Force -ErrorAction SilentlyContinue
   }
 }
 `
@@ -411,35 +420,54 @@ try {
 async function downloadAndInstallUpdate(asset, version) {
   if (updateDownloadPromise) return updateDownloadPromise
   updateDownloadPromise = (async () => {
-    const updateDirectory = path.join(app.getPath('temp'), `gameonix-update-${version}-${Date.now()}`)
-    const archivePath = path.join(updateDirectory, UPDATE_ASSET_NAME)
-    await fs.mkdir(updateDirectory, { recursive: true })
+    const installDirectory = path.dirname(process.execPath)
+    const updateDirectory = path.join(installDirectory, '.gameonix-update')
+    const archivePath = path.join(updateDirectory, `GameOnix-${version}-win-unpacked.zip`)
+    const partialArchivePath = `${archivePath}.partial`
     try {
-      setUpdaterState({ status: 'downloading', progress: 0, availableVersion: version, error: '' })
-      const response = await net.fetch(asset.browser_download_url, { headers: { 'User-Agent': 'GameOnix-Desktop-Updater' } })
-      if (!response.ok || !response.body) throw new Error(`GitHub returned ${response.status} while downloading the update.`)
       const expectedDigest = asset.digest.slice('sha256:'.length).toLowerCase()
-      const hash = crypto.createHash('sha256')
-      const totalBytes = Number(asset.size) || Number(response.headers.get('content-length')) || 0
-      let receivedBytes = 0
-      let lastProgressAt = 0
-      const progressStream = new Transform({
-        transform(chunk, _encoding, callback) {
-          hash.update(chunk)
-          receivedBytes += chunk.length
-          const now = Date.now()
-          if (totalBytes && now - lastProgressAt > 250) {
-            lastProgressAt = now
-            setUpdaterState({ progress: Math.min(99, Math.round(receivedBytes / totalBytes * 100)) })
-          }
-          callback(null, chunk)
-        },
-      })
-      await pipeline(Readable.fromWeb(response.body), progressStream, fsSync.createWriteStream(archivePath))
-      if (hash.digest('hex').toLowerCase() !== expectedDigest) throw new Error('The update archive failed its SHA-256 integrity check.')
+      await fs.mkdir(updateDirectory, { recursive: true })
+
+      let cachedArchiveIsValid = false
+      try {
+        const cached = await fs.stat(archivePath)
+        if ((!asset.size || cached.size === Number(asset.size)) && await sha256File(archivePath) === expectedDigest) {
+          cachedArchiveIsValid = true
+        } else {
+          await fs.rm(archivePath, { force: true })
+        }
+      } catch {}
+
+      if (cachedArchiveIsValid) {
+        setUpdaterState({ status: 'downloading', progress: 100, availableVersion: version, error: '' })
+      } else {
+        await fs.rm(partialArchivePath, { force: true })
+        setUpdaterState({ status: 'downloading', progress: 0, availableVersion: version, error: '' })
+        const response = await net.fetch(asset.browser_download_url, { headers: { 'User-Agent': 'GameOnix-Desktop-Updater' } })
+        if (!response.ok || !response.body) throw new Error(`GitHub returned ${response.status} while downloading the update.`)
+        const hash = crypto.createHash('sha256')
+        const totalBytes = Number(asset.size) || Number(response.headers.get('content-length')) || 0
+        let receivedBytes = 0
+        let lastProgressAt = 0
+        const progressStream = new Transform({
+          transform(chunk, _encoding, callback) {
+            hash.update(chunk)
+            receivedBytes += chunk.length
+            const now = Date.now()
+            if (totalBytes && now - lastProgressAt > 250) {
+              lastProgressAt = now
+              setUpdaterState({ progress: Math.min(99, Math.round(receivedBytes / totalBytes * 100)) })
+            }
+            callback(null, chunk)
+          },
+        })
+        await pipeline(Readable.fromWeb(response.body), progressStream, fsSync.createWriteStream(partialArchivePath))
+        if (hash.digest('hex').toLowerCase() !== expectedDigest) throw new Error('The update archive failed its SHA-256 integrity check.')
+        await fs.rename(partialArchivePath, archivePath)
+      }
       await launchPortableUpdater(archivePath, version)
     } catch (error) {
-      await fs.rm(updateDirectory, { recursive: true, force: true }).catch(() => {})
+      await fs.rm(partialArchivePath, { force: true }).catch(() => {})
       setUpdaterState({ status: 'error', error: error?.message || 'The update could not be installed.' })
     } finally {
       updateDownloadPromise = null
