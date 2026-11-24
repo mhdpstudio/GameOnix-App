@@ -29,10 +29,6 @@ function readSelection(service) {
     // Storage can be unavailable in restricted browser contexts.
   }
 
-  if (service === "auth" && hasSavedSession()) {
-    return API_ORIGINS.auth[0];
-  }
-
   const origins = API_ORIGINS[service];
   return origins[Math.floor(Math.random() * origins.length)];
 }
@@ -64,8 +60,9 @@ export function getBalancedApiOrigin(service) {
   return selected;
 }
 
-function shouldRetry(response, method) {
+function shouldRetry(response, method, service) {
   return response.status === 429 ||
+    (service === "auth" && hasSavedSession() && response.status === 401) ||
     (["GET", "HEAD", "OPTIONS"].includes(method) && response.status >= 500);
 }
 
@@ -120,7 +117,7 @@ window.fetch = async function gameonixBalancedFetch(input, init) {
     }
   }
 
-  if (firstResponse && !shouldRetry(firstResponse, method)) {
+  if (firstResponse && !shouldRetry(firstResponse, method, service)) {
     if (!isAvatarUpload) saveSelection(service, firstOrigin);
     return firstResponse;
   }
@@ -138,13 +135,13 @@ window.fetch = async function gameonixBalancedFetch(input, init) {
   if (
     service === "auth" &&
     hasSavedSession() &&
-    [401, 403].includes(fallbackResponse.status) &&
-    (firstError || (firstResponse && shouldRetry(firstResponse, method)))
+    fallbackResponse.status === 401 &&
+    (firstError || (firstResponse && shouldRetry(firstResponse, method, service)))
   ) {
     return firstResponse || Promise.reject(firstError);
   }
 
-  if (!shouldRetry(fallbackResponse, method) && !isAvatarUpload) {
+  if (!shouldRetry(fallbackResponse, method, service) && !isAvatarUpload) {
     saveSelection(service, secondOrigin);
   }
   return fallbackResponse;
