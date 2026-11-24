@@ -1549,6 +1549,38 @@ function registerDownloadIpc() {
     if (job) await job
     return publicDirectDownload(item)
   })
+  ipcMain.handle('downloads:direct-remove', async (event, { id, deleteFiles = false } = {}) => {
+    requireTrustedFrame(event)
+    const safeId = safeSlug(id)
+    const item = directDownloads.get(safeId)
+    if (!item) return [...directDownloads.values()].map(publicDirectDownload)
+    directDownloadControllers.get(safeId)?.abort()
+    const browserItem = directDownloadBrowserItems.get(safeId)
+    if (browserItem) {
+      await new Promise((resolve) => {
+        if (['completed', 'cancelled', 'interrupted'].includes(browserItem.getState())) return resolve()
+        browserItem.once('done', resolve)
+        browserItem.cancel()
+      })
+    }
+    const browser = directDownloadBrowserWindows.get(safeId)
+    if (browser && !browser.isDestroyed()) browser.close()
+    const job = directDownloadJobs.get(safeId)
+    if (job) await job
+    const baseDirectory = path.resolve(item.downloadDirectory || downloadDirectory)
+    const expectedDirectory = path.resolve(path.join(baseDirectory, safeSlug(item.slug)))
+    const relativeDirectory = path.relative(baseDirectory, expectedDirectory)
+    if (deleteFiles && relativeDirectory && relativeDirectory !== '..' && !relativeDirectory.startsWith(`..${path.sep}`) && !path.isAbsolute(relativeDirectory)) {
+      await fs.rm(expectedDirectory, { recursive: true, force: true })
+    }
+    directDownloadControllers.delete(safeId)
+    directDownloadJobs.delete(safeId)
+    directDownloadBrowserItems.delete(safeId)
+    directDownloads.delete(safeId)
+    publishDirectDownloads()
+    syncTray()
+    return [...directDownloads.values()].map(publicDirectDownload)
+  })
   ipcMain.handle('downloads:direct-pause', (event, id) => {
     requireTrustedFrame(event)
     const item = directDownloads.get(safeSlug(id))

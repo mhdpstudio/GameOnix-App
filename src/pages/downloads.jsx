@@ -95,7 +95,7 @@ export default function Downloads() {
     }
   }
 
-  async function removeDownload(item) {
+  async function removeDownload(item, isDirect = false) {
     const answer = await confirmWithCheckbox({
       title: "Remove this download?",
       message: `Remove ${item.title} from your downloads? You can choose whether its files should also be deleted from this device.`,
@@ -105,7 +105,7 @@ export default function Downloads() {
       danger: true,
     });
     if (!answer?.confirmed) return;
-    await runAction(item.id, () => desktop.downloads.remove(item.id, answer.checked));
+    await runAction(item.id, () => isDirect ? desktop.downloads.directRemove(item.id, answer.checked) : desktop.downloads.remove(item.id, answer.checked));
   }
 
   if (!desktop) return <main className="downloads-page"><section className="downloads-empty"><FontAwesomeIcon icon={faDownload} /><h1>Downloads are available in GameOnix Desktop</h1><p>Install the GameOnix app to download games and track their progress here.</p><Link to="/games">Browse games</Link></section></main>;
@@ -130,10 +130,10 @@ export default function Downloads() {
             {item.status === "waiting-for-download" && <button type="button" className="is-primary" onClick={() => void runAction(item.id, () => desktop.downloads.directStartPage(item.id))} disabled={isBusy}><FontAwesomeIcon icon={faPlay} /> Start download</button>}
             {item.status === "downloading" && <button type="button" onClick={() => void runAction(item.id, () => desktop.downloads.directPause(item.id))} disabled={isBusy}><FontAwesomeIcon icon={faPause} /> Pause</button>}
             {item.status === "paused" && <button type="button" className="is-primary" onClick={() => void runAction(item.id, () => desktop.downloads.directResume(item.id))} disabled={isBusy}><FontAwesomeIcon icon={faPlay} /> Resume</button>}
-            {active || item.status === "paused" ? <button type="button" onClick={() => void runAction(item.id, () => desktop.downloads.directCancel(item.id))} disabled={isBusy}><FontAwesomeIcon icon={faTrash} /> Cancel</button> : null}
             {item.status === "completed" && <button type="button" className="is-primary" onClick={() => void runAction(item.id, () => desktop.downloads.directOpen(item.id))}><FontAwesomeIcon icon={faFolderOpen} /> Open file</button>}
             {item.status === "completed" && <span className="download-complete-label"><FontAwesomeIcon icon={faCheck} /> Ready</span>}
             {["error", "cancelled"].includes(item.status) && <button type="button" className="is-primary" onClick={() => void runAction(item.id, () => desktop.downloads.directStart({ slug: item.slug, title: item.title, url: item.sourceUrl }))} disabled={isBusy}><FontAwesomeIcon icon={faPlay} /> Try again</button>}
+            <button type="button" className="download-remove-button" onClick={() => void removeDownload(item, true)} disabled={isBusy}><FontAwesomeIcon icon={faTrash} /> Remove</button>
           </div>
         </article>;
       })}
