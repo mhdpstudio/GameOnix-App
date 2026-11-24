@@ -24,6 +24,21 @@ import { isValidEmail } from "../utils/email";
 import "./../style/login-style.css";
 
 const API_URL = "https://gameonix-backend.vercel.app/api/auth";
+const AUTH_CLIENT_ID_KEY = "gameonix_auth_client_id";
+
+function getAuthClientId() {
+  try {
+    let clientId = window.localStorage.getItem(AUTH_CLIENT_ID_KEY);
+    if (!clientId) {
+      clientId = window.crypto?.randomUUID?.() ||
+        `client_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
+      window.localStorage.setItem(AUTH_CLIENT_ID_KEY, clientId);
+    }
+    return clientId;
+  } catch {
+    return "";
+  }
+}
 
 function Login() {
   const navigate = useNavigate();
@@ -192,11 +207,14 @@ function Login() {
   }
 
   async function postJson(endpoint, body) {
+    const headers = { "Content-Type": "application/json" };
+    if (["login", "register"].includes(endpoint)) {
+      const clientId = getAuthClientId();
+      if (clientId) headers["X-GameOnix-Client-ID"] = clientId;
+    }
     const response = await fetch(`${API_URL}/${endpoint}`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers,
       credentials: "include",
       body: JSON.stringify(body),
     });

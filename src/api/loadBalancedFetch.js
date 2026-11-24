@@ -61,9 +61,10 @@ export function getBalancedApiOrigin(service) {
 }
 
 function shouldRetry(response, method, service) {
-  return response.status === 429 ||
+  const safeMethod = ["GET", "HEAD", "OPTIONS"].includes(method);
+  return (safeMethod && response.status === 429) ||
     (service === "auth" && hasSavedSession() && response.status === 401) ||
-    (["GET", "HEAD", "OPTIONS"].includes(method) && response.status >= 500);
+    (safeMethod && response.status >= 500);
 }
 
 function makeRequestInput(input, isRequest, destination) {
