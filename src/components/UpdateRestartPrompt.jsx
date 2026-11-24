@@ -54,7 +54,8 @@ export default function UpdateRestartPrompt() {
       <div className="update-restart-icon"><FontAwesomeIcon icon={faRocket} /></div>
       <span className="update-restart-eyebrow">UPDATE READY</span>
       <h2 id="update-restart-title">Restart GameOnix now?</h2>
-      <p id="update-restart-copy">Version {update.availableVersion} is downloaded and ready. Restart now to finish installing it, or keep working and restart later.</p>
+      <p id="update-restart-copy">Version {update.availableVersion} is downloaded and ready. Restart now to install it; GameOnix will reopen when the installer has finished.</p>
+      {busy && <p className="update-restart-progress" role="status" aria-live="polite">Closing GameOnix and starting the installer…</p>}
       {error && <p className="update-restart-error" role="alert">{error}</p>}
       <div className="update-restart-actions">
         <button type="button" className="update-restart-later" onClick={() => void restartLater()} disabled={busy}><FontAwesomeIcon icon={faClock} /> Later</button>

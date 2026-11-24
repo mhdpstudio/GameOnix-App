@@ -430,6 +430,9 @@ function Write-UpdateLog([string]$message) {
 try {
   $updateLock = [IO.File]::Open($lockPath, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
   $ownsUpdateLock = $true
+  $Host.UI.RawUI.WindowTitle = 'GameOnix Update Installer'
+  Write-Progress -Activity ('Installing GameOnix ' + '${version}') -Status 'Waiting for GameOnix to close' -PercentComplete 5
+  Write-Host ('GameOnix update ' + '${version}')
   Write-UpdateLog 'Waiting for all GameOnix processes to close before applying the update.'
   $deadline = [DateTime]::UtcNow.AddMinutes(2)
   while ($true) {
@@ -438,14 +441,20 @@ try {
     if ([DateTime]::UtcNow -ge $deadline) { throw 'Timed out waiting for GameOnix to close.' }
     Start-Sleep -Milliseconds 400
   }
+  Write-Progress -Activity ('Installing GameOnix ' + '${version}') -Status 'Extracting update files' -PercentComplete 20
+  Write-Host 'Extracting update files...'
   Write-UpdateLog ('Extracting update ' + '${version}' + '.')
   Expand-Archive -LiteralPath $archivePath -DestinationPath $stageDirectory -Force
+  Write-Progress -Activity ('Installing GameOnix ' + '${version}') -Status 'Copying updated files into the GameOnix folder' -PercentComplete 55
+  Write-Host 'Copying updated files...'
   Write-UpdateLog ('Copying update files into ' + $installDirectory + '.')
   $robocopy = Join-Path $env:SystemRoot 'System32\\robocopy.exe'
   & $robocopy $stageDirectory $installDirectory /E /R:5 /W:1 /NFL /NDL /NJH /NJS
   $copyExitCode = $LASTEXITCODE
   Write-UpdateLog ('Robocopy finished with code ' + $copyExitCode + '.')
   if ($copyExitCode -ge 8) { throw ('Copying the update failed with robocopy code ' + $copyExitCode) }
+  Write-Progress -Activity ('Installing GameOnix ' + '${version}') -Status 'Checking installed files' -PercentComplete 88
+  Write-Host 'Checking installed files...'
   foreach ($relativePath in @('GameOnix.exe', 'resources/app.asar')) {
     $sourceFile = Join-Path $stageDirectory $relativePath
     $installedFile = Join-Path $installDirectory $relativePath
@@ -455,30 +464,41 @@ try {
     if ($sourceHash -ne $installedHash) { throw ('Installed ' + $relativePath + ' does not match the verified update.') }
   }
   $installSucceeded = $true
-  Write-UpdateLog ('Update ' + '${version}' + ' verified in the app folder. Opening GameOnix.')
-  $updatedProcess = Start-Process -FilePath $executablePath -WorkingDirectory $installDirectory -PassThru -ErrorAction Stop
-  $launchAttempted = $true
-  Write-UpdateLog ('Opened updated GameOnix process ' + $updatedProcess.Id + '.')
+  Write-Progress -Activity ('Installing GameOnix ' + '${version}') -Status 'Update verified; preparing to reopen GameOnix' -PercentComplete 98
+  Write-Host 'Update verified. GameOnix will reopen automatically.'
+  Write-UpdateLog ('Update ' + '${version}' + ' verified in the app folder. Preparing automatic restart.')
 } catch {
   Write-UpdateLog ('Update failed: ' + $_.Exception.Message)
-  $alreadyRunning = @(Get-Process -Name $processName -ErrorAction SilentlyContinue).Count -gt 0
-  if ($installSucceeded -and -not $launchAttempted -and (Test-Path -LiteralPath $executablePath) -and -not $alreadyRunning) {
-    Start-Process -FilePath $executablePath -WorkingDirectory $installDirectory -ErrorAction SilentlyContinue
-  } elseif ($alreadyRunning) {
-    Write-UpdateLog 'GameOnix is already running; skipped fallback restart.'
-  } elseif (-not $installSucceeded) {
-    Write-UpdateLog 'The update was not verified; GameOnix was not restarted automatically.'
-  }
+  Write-Progress -Activity ('Installing GameOnix ' + '${version}') -Status ('Update failed: ' + $_.Exception.Message) -Completed
+  Write-Host ('Update failed: ' + $_.Exception.Message) -ForegroundColor Red
+  Write-Host 'The existing app files were not verified. Keep this window open and contact support if the problem repeats.'
+  if (-not $installSucceeded) { Write-UpdateLog 'The update was not verified; automatic restart was skipped.' }
 } finally {
   Remove-Item -LiteralPath $stageDirectory -Recurse -Force -ErrorAction SilentlyContinue
   if ($updateLock) { $updateLock.Dispose() }
   if ($ownsUpdateLock) { Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue }
   Remove-Item -LiteralPath (Join-Path $updateDirectory 'launch-gameonix-update.vbs') -Force -ErrorAction SilentlyContinue
   if ($installSucceeded) {
+    Write-Progress -Activity ('Installing GameOnix ' + '${version}') -Completed
     Remove-Item -LiteralPath $archivePath -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $updateDirectory -Force -ErrorAction SilentlyContinue
   }
+}
+if ($installSucceeded) {
+  $relauncherPath = Join-Path $env:TEMP ('gameonix-relaunch-' + [guid]::NewGuid().ToString('N') + '.ps1')
+  $relauncher = @'
+param([int]$installerPid, [string]$executablePath, [string]$installDirectory)
+while (Get-Process -Id $installerPid -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 250 }
+Start-Process -FilePath $executablePath -WorkingDirectory $installDirectory -ErrorAction Stop
+Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
+'@
+  Set-Content -LiteralPath $relauncherPath -Value $relauncher -Encoding UTF8
+  $helperPowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+  $helperArguments = '-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $relauncherPath + '" ' + $PID + ' "' + $executablePath + '" "' + $installDirectory + '"'
+  Start-Process -FilePath $helperPowerShell -ArgumentList $helperArguments -WindowStyle Hidden -ErrorAction Stop
+} else {
+  Read-Host 'Press Enter to close this installer window' | Out-Null
 }
 `
   await acquirePortableUpdateLock(lockPath, version)
@@ -488,9 +508,9 @@ try {
     const powershellCommand = [
       `"${powershellPath}"`,
       '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
-      '-WindowStyle', 'Hidden', '-File', `"${scriptPath.replace(/"/g, '""')}"`,
+      '-File', `"${scriptPath.replace(/"/g, '""')}"`,
     ].join(' ')
-    const launcherScript = `Set updaterShell = CreateObject("WScript.Shell")\r\nupdaterShell.Run "${powershellCommand.replace(/"/g, '""')}", 0, False\r\n`
+    const launcherScript = `Set updaterShell = CreateObject("WScript.Shell")\r\nupdaterShell.Run "${powershellCommand.replace(/"/g, '""')}", 1, False\r\n`
     await fs.writeFile(launcherScriptPath, launcherScript, 'utf8')
     await new Promise((resolve, reject) => {
       // Windows Script Host detaches the installer from Electron's process
@@ -504,7 +524,7 @@ try {
       child.once('spawn', () => { child.unref(); resolve() })
     })
     launcherStarted = true
-    setUpdaterState({ status: 'restarting', progress: 100, availableVersion: version })
+    setUpdaterState({ status: 'restarting', progress: 0, availableVersion: version, error: '' })
     isQuitting = true
     // Remove the background tray entry too; app.quit() must end the full app process,
     // including when the main window had previously been hidden to the tray.

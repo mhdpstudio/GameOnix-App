@@ -51,6 +51,7 @@
   line-height: 1.7;
 }
 
+.update-restart-dialog .update-restart-progress { color: #c6b5ff; }
 .update-restart-dialog .update-restart-error {
   margin-top: 12px;
   color: #ff9a9a;

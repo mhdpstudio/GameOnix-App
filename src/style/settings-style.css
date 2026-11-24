@@ -33,6 +33,8 @@
 .settings-update-progress > div:first-child { display: flex; justify-content: space-between; margin-bottom: 8px; color: #d5cfea; font-size: 12px; }
 .settings-progress-track { height: 9px; overflow: hidden; border-radius: 99px; background: #292631; }
 .settings-progress-track > span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #7049df, #b49aff); transition: width .3s ease; }
+.settings-progress-track.is-indeterminate > span { width: 36%; animation: settings-progress-slide 1.1s ease-in-out infinite alternate; }
+@keyframes settings-progress-slide { from { transform: translateX(0); } to { transform: translateX(178%); } }
 .settings-update-progress small { display: block; margin-top: 8px; color: #898493; font-size: 11px; line-height: 1.6; }
 .settings-update-error, .settings-error { color: #ff9a9a; font-size: 12px; }
 .settings-update-actions { display: flex; align-items: center; gap: 13px; padding: 15px 0 17px; border-top: 1px solid #292731; }
