@@ -47,8 +47,10 @@ contextBridge.exposeInMainWorld('gameonixDesktop', {
     directList: () => ipcRenderer.invoke('downloads:direct-list'),
     directStart: (game) => ipcRenderer.invoke('downloads:direct-start', game),
     directCancel: (id) => ipcRenderer.invoke('downloads:direct-cancel', id),
+    directPause: (id) => ipcRenderer.invoke('downloads:direct-pause', id),
+    directResume: (id) => ipcRenderer.invoke('downloads:direct-resume', id),
     directOpen: (id) => ipcRenderer.invoke('downloads:direct-open', id),
-    directShowPage: (id) => ipcRenderer.invoke('downloads:direct-show-page', id),
+    directStartPage: (id) => ipcRenderer.invoke('downloads:direct-start-page', id),
     onDirectUpdate: (callback) => {
       const listener = (_event, downloads) => callback(downloads)
       ipcRenderer.on('downloads:direct-update', listener)

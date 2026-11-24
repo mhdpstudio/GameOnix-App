@@ -271,20 +271,9 @@ function GameDetails() {
             const item = await window.gameonixDesktop.downloads.directStart({ slug: game.slug, title: game.title, url: game.gameLink });
             setDirectDownload(item);
             if (item.status === "downloading") void recordGameActivity(game.slug, "download").catch(() => {});
+            navigate("/downloads");
         } catch (reason) {
             setDirectDownload({ id: game.slug, status: "error", error: reason?.message || "The direct download could not start." });
-        } finally {
-            setDirectDownloadBusy(false);
-        }
-    }
-
-    async function cancelDirectDownload() {
-        if (!game?.slug || !window.gameonixDesktop) return;
-        setDirectDownloadBusy(true);
-        try {
-            setDirectDownload(await window.gameonixDesktop.downloads.directCancel(game.slug));
-        } catch (reason) {
-            setDirectDownload((current) => ({ ...current, status: "error", error: reason?.message || "The download could not be cancelled." }));
         } finally {
             setDirectDownloadBusy(false);
         }
@@ -1018,11 +1007,11 @@ function GameDetails() {
                                         <button
                                             type="button"
                                             className="game-action game-download"
-                                            onClick={directDownload?.status === "completed" ? openDirectDownload : ["downloading", "waiting-for-download"].includes(directDownload?.status) ? cancelDirectDownload : startDesktopDirectDownload}
+                                            onClick={directDownload?.status === "completed" ? openDirectDownload : ["downloading", "waiting-for-download", "paused"].includes(directDownload?.status) ? () => navigate("/downloads") : startDesktopDirectDownload}
                                             disabled={directDownloadBusy}
                                         >
                                             <FontAwesomeIcon icon={faDownload} />
-                                            {directDownloadBusy ? "Please wait…" : directDownload?.status === "completed" ? "Open downloaded file" : ["downloading", "waiting-for-download"].includes(directDownload?.status) ? "Cancel download" : "Download Game"}
+                                            {directDownloadBusy ? "Please wait…" : directDownload?.status === "completed" ? "Open downloaded file" : ["downloading", "waiting-for-download", "paused"].includes(directDownload?.status) ? "View download" : "Download Game"}
                                         </button>
                                     )
                                 ) : (

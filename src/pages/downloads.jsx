@@ -29,7 +29,7 @@ function formatDuration(seconds) {
 }
 
 function statusLabel(status) {
-  return ({ selecting: "Choose files", starting: "Connecting", downloading: "Downloading", "waiting-for-download": "Finish on download page", finalizing: "Finishing files", paused: "Paused", completed: "Complete", cancelled: "Cancelled", error: "Needs attention" })[status] || "Waiting";
+  return ({ selecting: "Choose files", starting: "Connecting", downloading: "Downloading", "waiting-for-download": "Ready to start", finalizing: "Finishing files", paused: "Paused", completed: "Complete", cancelled: "Cancelled", error: "Needs attention" })[status] || "Waiting";
 }
 
 function peerDiscoveryHint(item) {
@@ -122,13 +122,15 @@ export default function Downloads() {
         return <article className={`download-card is-${item.status}`} key={`direct-${item.id}`}>
           <div className="download-card-top"><span className={`download-status status-${item.status}`}><i />{statusLabel(item.status)}</span><strong>{percent.toFixed(1)}%</strong></div>
           <h2>{item.title}</h2>
-          {item.status === "waiting-for-download" && <p className="download-peer-discovery">The download page is open in GameOnix. Click its download button to start saving the file here.</p>}
+          {item.status === "waiting-for-download" && <p className="download-peer-discovery">The link is preparing in the background. Press Start download if the file does not begin automatically.</p>}
           {item.error && <p className="download-card-error">{item.error}</p>}
           <div className="download-progress"><span style={{ width: `${percent}%` }} /></div>
-          <div className="download-meta"><span>{formatBytes(item.downloaded)} of {item.total ? formatBytes(item.total) : "—"}</span>{item.status === "downloading" && <span><FontAwesomeIcon icon={faArrowDown} /> {formatBytes(item.speed)}/s</span>}</div>
+          <div className="download-meta"><span>{formatBytes(item.downloaded)} of {item.total ? formatBytes(item.total) : "—"}</span>{item.status === "downloading" && <span><FontAwesomeIcon icon={faArrowDown} /> {formatBytes(item.speed)}/s</span>}{item.status === "downloading" && <span><FontAwesomeIcon icon={faClock} /> {formatDuration(item.etaSeconds)}</span>}</div>
           <div className="download-card-actions">
-            {item.status === "waiting-for-download" && <button type="button" onClick={() => void runAction(item.id, () => desktop.downloads.directShowPage(item.id))} disabled={isBusy}>Show download page</button>}
-            {active && <button type="button" onClick={() => void runAction(item.id, () => desktop.downloads.directCancel(item.id))} disabled={isBusy}><FontAwesomeIcon icon={faPause} /> Cancel</button>}
+            {item.status === "waiting-for-download" && <button type="button" className="is-primary" onClick={() => void runAction(item.id, () => desktop.downloads.directStartPage(item.id))} disabled={isBusy}><FontAwesomeIcon icon={faPlay} /> Start download</button>}
+            {item.status === "downloading" && <button type="button" onClick={() => void runAction(item.id, () => desktop.downloads.directPause(item.id))} disabled={isBusy}><FontAwesomeIcon icon={faPause} /> Pause</button>}
+            {item.status === "paused" && <button type="button" className="is-primary" onClick={() => void runAction(item.id, () => desktop.downloads.directResume(item.id))} disabled={isBusy}><FontAwesomeIcon icon={faPlay} /> Resume</button>}
+            {active || item.status === "paused" ? <button type="button" onClick={() => void runAction(item.id, () => desktop.downloads.directCancel(item.id))} disabled={isBusy}><FontAwesomeIcon icon={faTrash} /> Cancel</button> : null}
             {item.status === "completed" && <button type="button" className="is-primary" onClick={() => void runAction(item.id, () => desktop.downloads.directOpen(item.id))}><FontAwesomeIcon icon={faFolderOpen} /> Open file</button>}
             {item.status === "completed" && <span className="download-complete-label"><FontAwesomeIcon icon={faCheck} /> Ready</span>}
             {["error", "cancelled"].includes(item.status) && <button type="button" className="is-primary" onClick={() => void runAction(item.id, () => desktop.downloads.directStart({ slug: item.slug, title: item.title, url: item.sourceUrl }))} disabled={isBusy}><FontAwesomeIcon icon={faPlay} /> Try again</button>}

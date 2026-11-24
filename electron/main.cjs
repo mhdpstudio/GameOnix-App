@@ -596,6 +596,7 @@ function publicDownload(item) {
     downloaded: Number(item.downloaded) || 0,
     total: Number(item.total) || 0,
     speed: Number(item.speed) || 0,
+    etaSeconds: Number.isFinite(Number(item.etaSeconds)) ? Number(item.etaSeconds) : null,
     etaSeconds: Number.isFinite(item.etaSeconds) ? item.etaSeconds : null,
     peers: Number(item.peers) || 0,
     trackerCount: Number(item.trackerCount) || 0,
@@ -651,8 +652,9 @@ async function openDirectDownloadPage(item) {
     minWidth: 720,
     minHeight: 520,
     title: `Download ${item.title} — GameOnix`,
+    show: false,
     autoHideMenuBar: true,
-    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false },
   })
   const browserSession = browser.webContents.session
   const onWillDownload = (event, downloadItem, contents) => {
@@ -675,7 +677,13 @@ async function openDirectDownloadPage(item) {
     syncTray()
     downloadItem.on('updated', (_event, state) => {
       if (directDownloads.get(item.id) !== item) return
-      if (state === 'interrupted') item.status = 'error'
+      if (state === 'interrupted') {
+        item.status = downloadItem.canResume() ? 'paused' : 'error'
+        item.speed = 0
+        item.error = downloadItem.canResume() ? 'The connection paused. Resume to continue downloading.' : 'The file host interrupted the download.'
+      }
+      else if (downloadItem.isPaused()) item.status = 'paused'
+      else item.status = 'downloading'
       item.downloaded = Number(downloadItem.getReceivedBytes()) || 0
       item.total = Number(downloadItem.getTotalBytes()) || item.total
       item.progress = item.total ? Math.min(1, item.downloaded / item.total) : 0
@@ -685,6 +693,7 @@ async function openDirectDownloadPage(item) {
         previousBytes = item.downloaded
         previousSampleAt = now
       }
+      item.etaSeconds = item.speed > 0 && item.total > item.downloaded ? Math.ceil((item.total - item.downloaded) / item.speed) : null
       item.updatedAt = new Date().toISOString()
       publishDirectDownloads()
     })
@@ -695,6 +704,7 @@ async function openDirectDownloadPage(item) {
       item.progress = state === 'completed' ? 1 : (item.total ? Math.min(1, item.downloaded / item.total) : 0)
       item.status = state === 'completed' ? 'completed' : state === 'cancelled' ? 'cancelled' : 'error'
       item.speed = 0
+      item.etaSeconds = null
       item.error = state === 'completed' || state === 'cancelled' ? '' : 'The file host interrupted the download. Try again.'
       item.updatedAt = new Date().toISOString()
       publishDirectDownloads()
@@ -704,7 +714,7 @@ async function openDirectDownloadPage(item) {
   }
   browserSession.on('will-download', onWillDownload)
   browser.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('https://')) void browser.loadURL(url).catch(() => {})
+    if (url.startsWith('https://')) void browser.loadURL(url).then(() => scheduleDirectPageStart(browser)).catch(() => {})
     return { action: 'deny' }
   })
   browser.on('closed', () => {
@@ -721,7 +731,41 @@ async function openDirectDownloadPage(item) {
   item.error = ''
   item.updatedAt = new Date().toISOString()
   publishDirectDownloads()
+  browser.webContents.on('did-finish-load', () => scheduleDirectPageStart(browser))
   await browser.loadURL(item.sourceUrl)
+}
+
+function scheduleDirectPageStart(browser) {
+  const item = [...directDownloads.values()].find((entry) => directDownloadBrowserWindows.get(entry.id) === browser)
+  if (!item || item.status !== 'waiting-for-download') return
+  setTimeout(() => {
+    if (browser.isDestroyed() || item.status !== 'waiting-for-download') return
+    browser.webContents.executeJavaScript(`(() => {
+      const visible = (el) => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'; };
+      const candidates = [...document.querySelectorAll('button, a, [role="button"], input[type="button"], input[type="submit"]')]
+        .filter(visible)
+        .map((el) => ({ el, text: (el.innerText || el.value || el.getAttribute('aria-label') || '').trim() }))
+        .filter(({ text }) => /download|download now|download file|start download|descargar|herunterladen|télécharger|تنزيل/i.test(text))
+        .filter(({ text }) => !/app|extension|manager|premium|upgrade|advert|torrent/i.test(text));
+      if (!candidates.length) return false;
+      candidates.sort((a, b) => Number(/download/i.test(b.text)) - Number(/download/i.test(a.text)));
+      candidates[0].el.click();
+      return true;
+    })()`).catch(() => {})
+  }, 1000)
+}
+
+function waitForDirectResume(item, signal) {
+  if (item.status !== 'paused') return Promise.resolve()
+  return new Promise((resolve) => {
+    const finish = () => {
+      signal.removeEventListener('abort', finish)
+      if (item.resumeDownload === finish) item.resumeDownload = null
+      resolve()
+    }
+    item.resumeDownload = finish
+    signal.addEventListener('abort', finish, { once: true })
+  })
 }
 
 function publishDirectDownloads() {
@@ -1095,21 +1139,26 @@ async function performDirectDownload(item, sourceUrl, controller) {
     let lastPublishedAt = 0
     const progressStream = new Transform({
       transform(chunk, _encoding, callback) {
-        receivedBytes += chunk.length
-        const now = Date.now()
-        if (now - lastSampleAt >= 1000) {
-          item.speed = Math.max(0, (receivedBytes - lastSampleBytes) / ((now - lastSampleAt) / 1000))
-          lastSampleAt = now
-          lastSampleBytes = receivedBytes
-        }
-        item.downloaded = receivedBytes
-        item.progress = item.total ? Math.min(1, receivedBytes / item.total) : 0
-        item.updatedAt = new Date().toISOString()
-        if (now - lastPublishedAt >= 200) {
-          lastPublishedAt = now
-          publishDirectDownloads()
-        }
-        callback(null, chunk)
+        void (async () => {
+          await waitForDirectResume(item, controller.signal)
+          if (controller.signal.aborted) throw new Error('Download cancelled.')
+          receivedBytes += chunk.length
+          const now = Date.now()
+          if (now - lastSampleAt >= 1000) {
+            item.speed = Math.max(0, (receivedBytes - lastSampleBytes) / ((now - lastSampleAt) / 1000))
+            lastSampleAt = now
+            lastSampleBytes = receivedBytes
+          }
+          item.downloaded = receivedBytes
+          item.progress = item.total ? Math.min(1, receivedBytes / item.total) : 0
+          item.etaSeconds = item.speed > 0 && item.total > receivedBytes ? Math.ceil((item.total - receivedBytes) / item.speed) : null
+          item.updatedAt = new Date().toISOString()
+          if (now - lastPublishedAt >= 200) {
+            lastPublishedAt = now
+            publishDirectDownloads()
+          }
+          callback(null, chunk)
+        })().catch(callback)
       },
     })
 
@@ -1124,12 +1173,14 @@ async function performDirectDownload(item, sourceUrl, controller) {
     item.total = item.total || receivedBytes
     item.progress = 1
     item.speed = 0
+    item.etaSeconds = null
     item.status = 'completed'
     item.error = ''
     item.updatedAt = new Date().toISOString()
   } catch (error) {
     await fs.rm(temporaryPath, { force: true }).catch(() => {})
     item.speed = 0
+    item.etaSeconds = null
     item.status = controller.signal.aborted ? 'cancelled' : 'error'
     item.error = controller.signal.aborted ? '' : (error?.message || 'The direct download failed.')
     item.updatedAt = new Date().toISOString()
@@ -1472,6 +1523,7 @@ function registerDownloadIpc() {
       total: 0,
       progress: 0,
       speed: 0,
+      etaSeconds: null,
       error: '',
       updatedAt: new Date().toISOString(),
     }
@@ -1497,6 +1549,30 @@ function registerDownloadIpc() {
     if (job) await job
     return publicDirectDownload(item)
   })
+  ipcMain.handle('downloads:direct-pause', (event, id) => {
+    requireTrustedFrame(event)
+    const item = directDownloads.get(safeSlug(id))
+    if (!item || item.status !== 'downloading') throw new Error('This download cannot be paused right now.')
+    const browserItem = directDownloadBrowserItems.get(item.id)
+    if (browserItem) browserItem.pause()
+    item.status = 'paused'
+    item.speed = 0
+    item.updatedAt = new Date().toISOString()
+    publishDirectDownloads()
+    return publicDirectDownload(item)
+  })
+  ipcMain.handle('downloads:direct-resume', (event, id) => {
+    requireTrustedFrame(event)
+    const item = directDownloads.get(safeSlug(id))
+    if (!item || item.status !== 'paused') throw new Error('This download is not paused.')
+    const browserItem = directDownloadBrowserItems.get(item.id)
+    if (browserItem && (browserItem.isPaused() || browserItem.canResume())) browserItem.resume()
+    item.status = 'downloading'
+    item.updatedAt = new Date().toISOString()
+    item.resumeDownload?.()
+    publishDirectDownloads()
+    return publicDirectDownload(item)
+  })
   ipcMain.handle('downloads:direct-open', async (event, id) => {
     requireTrustedFrame(event)
     const item = directDownloads.get(safeSlug(id))
@@ -1505,14 +1581,12 @@ function registerDownloadIpc() {
     if (error) throw new Error(error)
     return { success: true }
   })
-  ipcMain.handle('downloads:direct-show-page', (event, id) => {
+  ipcMain.handle('downloads:direct-start-page', (event, id) => {
     requireTrustedFrame(event)
     const item = directDownloads.get(safeSlug(id))
     const browser = directDownloadBrowserWindows.get(safeSlug(id))
     if (!item || item.status !== 'waiting-for-download' || !browser || browser.isDestroyed()) throw new Error('The download page is no longer open.')
-    if (browser.isMinimized()) browser.restore()
-    browser.show()
-    browser.focus()
+    scheduleDirectPageStart(browser)
     return { success: true }
   })
 
