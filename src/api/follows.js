@@ -1,4 +1,5 @@
 import { authFetch } from "./session";
+import { getBalancedApiOrigin } from "./loadBalancedFetch.js";
 
 const API_URL = "https://gameonix-backend.vercel.app/api/auth/favorites";
 
@@ -20,7 +21,11 @@ export function getGameAnalytics() { return request("GET", null, "?analytics=1")
 export function recordGameActivity(slug, event) {
   const activityUrl = `${API_URL}?event=${encodeURIComponent(event)}&slug=${encodeURIComponent(slug)}`;
   if (typeof navigator !== "undefined" && typeof navigator.sendBeacon === "function") {
-    const queued = navigator.sendBeacon(activityUrl);
+    const beaconUrl = new URL(activityUrl);
+    const apiOrigin = new URL(getBalancedApiOrigin("auth"));
+    beaconUrl.protocol = apiOrigin.protocol;
+    beaconUrl.host = apiOrigin.host;
+    const queued = navigator.sendBeacon(beaconUrl.href);
     if (queued) return Promise.resolve({ recorded: true });
   }
 

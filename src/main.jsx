@@ -9,6 +9,7 @@ import "./style/index.css";
 import "./style/main-layout.css";
 import "./style/sidebar-style.css";
 
+import "./api/loadBalancedFetch.js";
 import App from "./App.jsx";
 import DesktopTitleBar from "./components/DesktopTitleBar.jsx";
 import UpdateRestartPrompt from "./components/UpdateRestartPrompt.jsx";
