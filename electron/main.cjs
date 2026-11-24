@@ -506,6 +506,10 @@ try {
     launcherStarted = true
     setUpdaterState({ status: 'restarting', progress: 100, availableVersion: version })
     isQuitting = true
+    // Remove the background tray entry too; app.quit() must end the full app process,
+    // including when the main window had previously been hidden to the tray.
+    try { tray?.destroy() } catch {}
+    tray = null
     app.quit()
   } catch (error) {
     if (!launcherStarted) await fs.rm(lockPath, { force: true }).catch(() => {})
