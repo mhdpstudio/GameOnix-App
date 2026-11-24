@@ -16,6 +16,29 @@ const API_URL = "https://gameonix-backend.vercel.app/api/auth";
 
 const AuthContext = createContext(null);
 
+async function reportDesktopAppVersion() {
+  const desktop = window.gameonixDesktop;
+  if (!desktop) return;
+  try {
+    const { version } = await desktop.settings.get();
+    if (!version) return;
+    const response = await authFetch(`${API_URL}/me`, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ action: "report-app-version", version }),
+    });
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({}));
+      throw new Error(result.error || `Version report failed (${response.status}).`);
+    }
+  } catch (error) {
+    console.warn("Could not report the GameOnix Desktop version:", error);
+  }
+}
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -49,6 +72,7 @@ export function AuthProvider({ children }) {
       const currentUser = data.user || null;
 
       setUser(currentUser);
+      if (currentUser && window.gameonixDesktop) void reportDesktopAppVersion();
       return currentUser;
     } catch (error) {
       console.error("Session restore failed:", error);
@@ -72,6 +96,7 @@ export function AuthProvider({ children }) {
       }
 
       setUser(userData || null);
+      if (userData && window.gameonixDesktop) void reportDesktopAppVersion();
     },
     []
   );
