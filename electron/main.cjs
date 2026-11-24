@@ -539,7 +539,11 @@ async function downloadAndInstallUpdate(asset, version) {
       } else {
         await fs.rm(partialArchivePath, { force: true })
         setUpdaterState({ status: 'downloading', progress: 0, availableVersion: version, error: '' })
-        const response = await net.fetch(asset.browser_download_url, { headers: { 'User-Agent': 'GameOnix-Desktop-Updater' } })
+        const downloadSignal = AbortSignal.timeout(15 * 60 * 1000)
+        const response = await net.fetch(asset.browser_download_url, {
+          headers: { 'User-Agent': 'GameOnix-Desktop-Updater' },
+          signal: downloadSignal,
+        })
         if (!response.ok || !response.body) throw new Error(`GitHub returned ${response.status} while downloading the update.`)
         const hash = crypto.createHash('sha256')
         const totalBytes = Number(asset.size) || Number(response.headers.get('content-length')) || 0
@@ -1442,6 +1446,12 @@ app.on('before-quit', (event) => {
   event.preventDefault()
   if (shutdownInProgress) return
   shutdownInProgress = true
+  // The updater waits for this process to exit before replacing app files.
+  // Keep the torrent checkpoint, but never block installation forever.
+  const shutdownDeadline = setTimeout(() => {
+    console.error('Timed out while closing the torrent client; exiting so the updater can continue.')
+    app.exit(0)
+  }, 30_000)
   const checkpointAndPause = async () => {
     for (const [id, torrent] of activeTorrents) {
       const item = downloads.get(id)
@@ -1461,12 +1471,14 @@ app.on('before-quit', (event) => {
       torrentClient.destroy((error) => {
         if (error) console.error('Could not close the torrent client cleanly:', error)
         void persistDownloads().catch((saveError) => console.error('Could not finish saving downloads:', saveError)).finally(() => {
+          clearTimeout(shutdownDeadline)
           shutdownComplete = true
           app.quit()
         })
       })
     } catch (error) {
       console.error('Could not close the torrent client cleanly:', error)
+      clearTimeout(shutdownDeadline)
       shutdownComplete = true
       app.quit()
     }
