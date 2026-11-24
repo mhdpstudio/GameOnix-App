@@ -596,8 +596,7 @@ function publicDownload(item) {
     downloaded: Number(item.downloaded) || 0,
     total: Number(item.total) || 0,
     speed: Number(item.speed) || 0,
-    etaSeconds: Number.isFinite(Number(item.etaSeconds)) ? Number(item.etaSeconds) : null,
-    etaSeconds: Number.isFinite(item.etaSeconds) ? item.etaSeconds : null,
+    etaSeconds: typeof item.etaSeconds === 'number' && Number.isFinite(item.etaSeconds) ? item.etaSeconds : null,
     peers: Number(item.peers) || 0,
     trackerCount: Number(item.trackerCount) || 0,
     privateTorrent: Boolean(item.privateTorrent),
@@ -625,6 +624,7 @@ function publicDirectDownload(item) {
     total: Number(item.total) || 0,
     progress: Number(item.progress) || 0,
     speed: Number(item.speed) || 0,
+    etaSeconds: typeof item.etaSeconds === 'number' && Number.isFinite(item.etaSeconds) ? item.etaSeconds : null,
     error: item.error || '',
     updatedAt: item.updatedAt || null,
   }
