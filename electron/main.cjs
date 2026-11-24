@@ -430,15 +430,18 @@ function Write-UpdateLog([string]$message) {
 try {
   $updateLock = [IO.File]::Open($lockPath, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
   $ownsUpdateLock = $true
-  $Host.UI.RawUI.WindowTitle = 'GameOnix Update Installer'
+  $Host.UI.RawUI.WindowTitle = 'GameOnix Update Installer - ${version}'
   Write-Progress -Activity ('Installing GameOnix ' + '${version}') -Status 'Waiting for GameOnix to close' -PercentComplete 5
   Write-Host ('GameOnix update ' + '${version}')
   Write-UpdateLog 'Waiting for all GameOnix processes to close before applying the update.'
-  $deadline = [DateTime]::UtcNow.AddMinutes(2)
+  $waitStartedAt = [DateTime]::UtcNow
+  $deadline = $waitStartedAt.AddMinutes(2)
   while ($true) {
     $runningProcesses = @(Get-Process -Name $processName -ErrorAction SilentlyContinue)
     if ($runningProcesses.Count -eq 0) { break }
     if ([DateTime]::UtcNow -ge $deadline) { throw 'Timed out waiting for GameOnix to close.' }
+    $waitProgress = [Math]::Min(18, 5 + [int](([DateTime]::UtcNow - $waitStartedAt).TotalSeconds / 8))
+    Write-Progress -Activity ('Installing GameOnix ' + '${version}') -Status 'Waiting for the app and background downloads to close' -PercentComplete $waitProgress
     Start-Sleep -Milliseconds 400
   }
   Write-Progress -Activity ('Installing GameOnix ' + '${version}') -Status 'Extracting update files' -PercentComplete 20
