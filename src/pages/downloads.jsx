@@ -29,7 +29,7 @@ function formatDuration(seconds) {
 }
 
 function statusLabel(status) {
-  return ({ selecting: "Choose files", starting: "Connecting", downloading: "Downloading", finalizing: "Finishing files", paused: "Paused", completed: "Complete", error: "Needs attention" })[status] || "Waiting";
+  return ({ selecting: "Choose files", starting: "Connecting", downloading: "Downloading", "waiting-for-download": "Finish on download page", finalizing: "Finishing files", paused: "Paused", completed: "Complete", cancelled: "Cancelled", error: "Needs attention" })[status] || "Waiting";
 }
 
 function peerDiscoveryHint(item) {
@@ -50,6 +50,7 @@ function peerDiscoveryHint(item) {
 
 export default function Downloads() {
   const [items, setItems] = useState([]);
+  const [directItems, setDirectItems] = useState([]);
   const [folder, setFolder] = useState("");
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState("");
@@ -60,8 +61,9 @@ export default function Downloads() {
   const refresh = useCallback(async () => {
     if (!desktop) return;
     try {
-      const [nextItems, nextFolder] = await Promise.all([desktop.downloads.list(), desktop.downloads.getDirectory()]);
+      const [nextItems, nextDirectItems, nextFolder] = await Promise.all([desktop.downloads.list(), desktop.downloads.directList(), desktop.downloads.getDirectory()]);
       setItems(nextItems);
+      setDirectItems(nextDirectItems);
       setFolder(nextFolder);
       setError("");
     } catch (reason) {
@@ -72,12 +74,13 @@ export default function Downloads() {
   useEffect(() => {
     if (!desktop) return undefined;
     const unsubscribe = desktop.downloads.onUpdate(setItems);
+    const unsubscribeDirect = desktop.downloads.onDirectUpdate(setDirectItems);
     void refresh();
-    return unsubscribe;
+    return () => { unsubscribe(); unsubscribeDirect(); };
   }, [desktop, refresh]);
 
-  const activeCount = useMemo(() => items.filter((item) => ["downloading", "starting", "finalizing"].includes(item.status)).length, [items]);
-  const completedCount = useMemo(() => items.filter((item) => item.status === "completed").length, [items]);
+  const activeCount = useMemo(() => items.filter((item) => ["downloading", "starting", "finalizing"].includes(item.status)).length + directItems.filter((item) => ["downloading", "waiting-for-download"].includes(item.status)).length, [items, directItems]);
+  const completedCount = useMemo(() => items.filter((item) => item.status === "completed").length + directItems.filter((item) => item.status === "completed").length, [items, directItems]);
 
   async function runAction(id, action) {
     setBusyId(id);
@@ -105,13 +108,34 @@ export default function Downloads() {
     await runAction(item.id, () => desktop.downloads.remove(item.id, answer.checked));
   }
 
-  if (!desktop) return <main className="downloads-page"><section className="downloads-empty"><FontAwesomeIcon icon={faDownload} /><h1>Downloads are available in GameOnix Desktop</h1><p>Install the GameOnix app to download torrents and track their progress here.</p><Link to="/games">Browse games</Link></section></main>;
+  if (!desktop) return <main className="downloads-page"><section className="downloads-empty"><FontAwesomeIcon icon={faDownload} /><h1>Downloads are available in GameOnix Desktop</h1><p>Install the GameOnix app to download games and track their progress here.</p><Link to="/games">Browse games</Link></section></main>;
 
   return <main className="downloads-page">
-    <header className="downloads-heading"><div><span className="downloads-eyebrow">GAMEONIX DESKTOP</span><h1>Downloads</h1><p>Track active torrents and find completed games in one place.</p></div><Link to="/settings" className="downloads-folder-button"><FontAwesomeIcon icon={faFolderOpen} /> Manage download settings</Link></header>
+    <header className="downloads-heading"><div><span className="downloads-eyebrow">GAMEONIX DESKTOP</span><h1>Downloads</h1><p>Track game downloads and find completed files in one place.</p></div><Link to="/settings" className="downloads-folder-button"><FontAwesomeIcon icon={faFolderOpen} /> Manage download settings</Link></header>
     <section className="downloads-summary"><article><span>Active downloads</span><strong>{activeCount}</strong></article><article><span>Completed</span><strong>{completedCount}</strong></article><article className="downloads-location"><span>Save location</span><strong title={folder}>{folder || "Loading..."}</strong></article></section>
     {error && <div className="downloads-error" role="alert">{error}</div>}
-    {!items.length ? <section className="downloads-empty"><span className="downloads-empty-icon"><FontAwesomeIcon icon={faArrowDown} /></span><h2>Your downloads will show here</h2><p>Open a game page and choose <strong>Download Game</strong> to start its torrent.</p><Link to="/games">Browse games</Link></section> : <section className="downloads-list" aria-label="Download list">{items.map((item) => {
+    {!items.length && !directItems.length ? <section className="downloads-empty"><span className="downloads-empty-icon"><FontAwesomeIcon icon={faArrowDown} /></span><h2>Your downloads will show here</h2><p>Start a game download and follow its progress here.</p><Link to="/games">Browse games</Link></section> : <section className="downloads-list" aria-label="Download list">
+      {directItems.map((item) => {
+        const percent = Math.min(100, Math.max(0, Number(item.progress) * 100));
+        const isBusy = busyId === item.id;
+        const active = ["downloading", "waiting-for-download"].includes(item.status);
+        return <article className={`download-card is-${item.status}`} key={`direct-${item.id}`}>
+          <div className="download-card-top"><span className={`download-status status-${item.status}`}><i />{statusLabel(item.status)}</span><strong>{percent.toFixed(1)}%</strong></div>
+          <h2>{item.title}</h2>
+          {item.status === "waiting-for-download" && <p className="download-peer-discovery">The download page is open in GameOnix. Click its download button to start saving the file here.</p>}
+          {item.error && <p className="download-card-error">{item.error}</p>}
+          <div className="download-progress"><span style={{ width: `${percent}%` }} /></div>
+          <div className="download-meta"><span>{formatBytes(item.downloaded)} of {item.total ? formatBytes(item.total) : "—"}</span>{item.status === "downloading" && <span><FontAwesomeIcon icon={faArrowDown} /> {formatBytes(item.speed)}/s</span>}</div>
+          <div className="download-card-actions">
+            {item.status === "waiting-for-download" && <button type="button" onClick={() => void runAction(item.id, () => desktop.downloads.directShowPage(item.id))} disabled={isBusy}>Show download page</button>}
+            {active && <button type="button" onClick={() => void runAction(item.id, () => desktop.downloads.directCancel(item.id))} disabled={isBusy}><FontAwesomeIcon icon={faPause} /> Cancel</button>}
+            {item.status === "completed" && <button type="button" className="is-primary" onClick={() => void runAction(item.id, () => desktop.downloads.directOpen(item.id))}><FontAwesomeIcon icon={faFolderOpen} /> Open file</button>}
+            {item.status === "completed" && <span className="download-complete-label"><FontAwesomeIcon icon={faCheck} /> Ready</span>}
+            {["error", "cancelled"].includes(item.status) && <button type="button" className="is-primary" onClick={() => void runAction(item.id, () => desktop.downloads.directStart({ slug: item.slug, title: item.title, url: item.sourceUrl }))} disabled={isBusy}><FontAwesomeIcon icon={faPlay} /> Try again</button>}
+          </div>
+        </article>;
+      })}
+      {items.map((item) => {
       const percent = Math.min(100, Math.max(0, Number(item.progress) * 100));
       const isBusy = busyId === item.id;
       const selectedFiles = fileChoices[item.id] ?? item.selectedFiles ?? [];

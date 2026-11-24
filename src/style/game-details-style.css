@@ -1193,18 +1193,3 @@
 .game-download-start:disabled, .game-download-secondary:disabled, .game-download-remove:disabled { opacity: .5; cursor: not-allowed; }
 .game-download-error { margin: 14px 22px 0; color: #ff9da5; font-size: 11px; }
 @media (max-width: 620px) { .game-download-overlay { padding: 12px; } .game-download-dialog { max-height: 88vh; } .game-download-dialog-footer { align-items: stretch; flex-direction: column; } .game-download-dialog-actions { justify-content: stretch; } .game-download-dialog-actions button { flex: 1 1 auto; } }
-
-
-.game-direct-download-status { margin-top: 11px; padding: 13px; border: 1px solid var(--game-border); border-radius: 10px; background: color-mix(in srgb, var(--game-panel) 88%, #111); color: var(--game-text); }
-.game-direct-download-heading, .game-direct-download-meta { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.game-direct-download-heading strong { font-size: 11px; }
-.game-direct-download-heading > span, .game-direct-download-meta > span { color: var(--game-muted); font-size: 10px; }
-.game-direct-download-track { height: 7px; margin-top: 10px; overflow: hidden; border-radius: 10px; background: color-mix(in srgb, var(--game-muted) 20%, transparent); }
-.game-direct-download-track > span { display: block; height: 100%; border-radius: inherit; background: var(--game-accent); transition: width .2s ease; }
-.game-direct-download-track.is-indeterminate > span { width: 32%; animation: direct-download-slide 1.2s ease-in-out infinite alternate; }
-@keyframes direct-download-slide { to { transform: translateX(215%); } }
-.game-direct-download-meta { margin-top: 9px; }
-.game-direct-download-meta > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.game-direct-download-meta button { flex: 0 0 auto; padding: 5px 9px; border: 1px solid var(--game-border); border-radius: 7px; background: var(--game-panel); color: var(--game-text); font: inherit; font-size: 10px; font-weight: 700; cursor: pointer; }
-.game-direct-download-meta button:disabled { opacity: .55; cursor: wait; }
-.game-direct-download-status > p { margin: 9px 0 0; color: #ff9da5; font-size: 10px; line-height: 1.5; }

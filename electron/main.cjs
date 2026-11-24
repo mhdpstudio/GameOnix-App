@@ -33,6 +33,8 @@ const downloads = new Map()
 const directDownloads = new Map()
 const directDownloadControllers = new Map()
 const directDownloadJobs = new Map()
+const directDownloadBrowserWindows = new Map()
+const directDownloadBrowserItems = new Map()
 const activeTorrents = new Map()
 const finalizingTorrents = new Set()
 const speedSamples = new Map()
@@ -615,6 +617,7 @@ function publicDirectDownload(item) {
     id: item.id,
     slug: item.slug,
     title: item.title,
+    sourceUrl: item.sourceUrl || '',
     status: item.status,
     fileName: item.fileName || '',
     downloaded: Number(item.downloaded) || 0,
@@ -624,6 +627,101 @@ function publicDirectDownload(item) {
     error: item.error || '',
     updatedAt: item.updatedAt || null,
   }
+}
+
+function nextDirectTargetPath(directory, filename) {
+  let targetPath = path.join(directory, filename)
+  if (!fsSync.existsSync(targetPath)) return targetPath
+  const extension = path.extname(filename)
+  const baseName = path.basename(filename, extension)
+  let suffix = 1
+  while (fsSync.existsSync(targetPath)) {
+    targetPath = path.join(directory, `${baseName} (${suffix})${extension}`)
+    suffix += 1
+  }
+  return targetPath
+}
+
+async function openDirectDownloadPage(item) {
+  const targetDirectory = path.join(item.downloadDirectory || downloadDirectory, item.slug)
+  await fs.mkdir(targetDirectory, { recursive: true })
+  const browser = new BrowserWindow({
+    width: 1040,
+    height: 760,
+    minWidth: 720,
+    minHeight: 520,
+    title: `Download ${item.title} — GameOnix`,
+    autoHideMenuBar: true,
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+  })
+  const browserSession = browser.webContents.session
+  const onWillDownload = (event, downloadItem, contents) => {
+    if (browser.isDestroyed() || contents.id !== browser.webContents.id) return
+    const filename = sanitizeDirectFilename(downloadItem.getFilename(), `${item.slug}.download`)
+    const targetPath = nextDirectTargetPath(targetDirectory, filename)
+    item.fileName = path.basename(targetPath)
+    item.targetPath = targetPath
+    item.total = Number(downloadItem.getTotalBytes()) || 0
+    item.downloaded = Number(downloadItem.getReceivedBytes()) || 0
+    item.progress = item.total ? Math.min(1, item.downloaded / item.total) : 0
+    item.status = 'downloading'
+    item.error = ''
+    item.updatedAt = new Date().toISOString()
+    downloadItem.setSavePath(targetPath)
+    directDownloadBrowserItems.set(item.id, downloadItem)
+    let previousBytes = item.downloaded
+    let previousSampleAt = Date.now()
+    publishDirectDownloads()
+    syncTray()
+    downloadItem.on('updated', (_event, state) => {
+      if (directDownloads.get(item.id) !== item) return
+      if (state === 'interrupted') item.status = 'error'
+      item.downloaded = Number(downloadItem.getReceivedBytes()) || 0
+      item.total = Number(downloadItem.getTotalBytes()) || item.total
+      item.progress = item.total ? Math.min(1, item.downloaded / item.total) : 0
+      const now = Date.now()
+      if (now - previousSampleAt >= 1000) {
+        item.speed = Math.max(0, (item.downloaded - previousBytes) / ((now - previousSampleAt) / 1000))
+        previousBytes = item.downloaded
+        previousSampleAt = now
+      }
+      item.updatedAt = new Date().toISOString()
+      publishDirectDownloads()
+    })
+    downloadItem.on('done', (_event, state) => {
+      directDownloadBrowserItems.delete(item.id)
+      item.downloaded = Number(downloadItem.getReceivedBytes()) || 0
+      item.total = Number(downloadItem.getTotalBytes()) || item.total || item.downloaded
+      item.progress = state === 'completed' ? 1 : (item.total ? Math.min(1, item.downloaded / item.total) : 0)
+      item.status = state === 'completed' ? 'completed' : state === 'cancelled' ? 'cancelled' : 'error'
+      item.speed = 0
+      item.error = state === 'completed' || state === 'cancelled' ? '' : 'The file host interrupted the download. Try again.'
+      item.updatedAt = new Date().toISOString()
+      publishDirectDownloads()
+      syncTray()
+      if (!browser.isDestroyed()) browser.close()
+    })
+  }
+  browserSession.on('will-download', onWillDownload)
+  browser.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('https://')) void browser.loadURL(url).catch(() => {})
+    return { action: 'deny' }
+  })
+  browser.on('closed', () => {
+    browserSession.removeListener('will-download', onWillDownload)
+    directDownloadBrowserWindows.delete(item.id)
+    if (item.status === 'waiting-for-download') {
+      item.status = 'cancelled'
+      item.updatedAt = new Date().toISOString()
+      publishDirectDownloads()
+    }
+  })
+  directDownloadBrowserWindows.set(item.id, browser)
+  item.status = 'waiting-for-download'
+  item.error = ''
+  item.updatedAt = new Date().toISOString()
+  publishDirectDownloads()
+  await browser.loadURL(item.sourceUrl)
 }
 
 function publishDirectDownloads() {
@@ -974,7 +1072,8 @@ async function performDirectDownload(item, sourceUrl, controller) {
     const contentType = String(response.headers.get('content-type') || '').toLowerCase()
     if (contentType.includes('text/html') || contentType.includes('application/xhtml+xml') || contentType.includes('application/json')) {
       await response.body.cancel().catch(() => {})
-      throw new Error('This link opens a web page, not a direct file. Use a direct download URL for this game.')
+      await openDirectDownloadPage(item)
+      return
     }
     const finalUrl = new URL(response.url || sourceUrl)
     if (finalUrl.protocol !== 'https:') {
@@ -987,17 +1086,8 @@ async function performDirectDownload(item, sourceUrl, controller) {
     const targetDirectory = path.join(baseDirectory, item.slug)
     await fs.mkdir(targetDirectory, { recursive: true })
     await fs.mkdir(tempDirectory, { recursive: true })
-    let targetPath = path.join(targetDirectory, item.fileName)
-    if (fsSync.existsSync(targetPath)) {
-      const extension = path.extname(item.fileName)
-      const baseName = path.basename(item.fileName, extension)
-      let suffix = 1
-      while (fsSync.existsSync(targetPath)) {
-        targetPath = path.join(targetDirectory, `${baseName} (${suffix})${extension}`)
-        suffix += 1
-      }
-      item.fileName = path.basename(targetPath)
-    }
+    const targetPath = nextDirectTargetPath(targetDirectory, item.fileName)
+    item.fileName = path.basename(targetPath)
 
     let receivedBytes = 0
     let lastSampleAt = Date.now()
@@ -1103,7 +1193,7 @@ function getMainWindow() {
 
 function hasActiveDownloads() {
   return [...downloads.values()].some((item) => ['downloading', 'starting', 'finalizing'].includes(item.status)) ||
-    [...directDownloads.values()].some((item) => item.status === 'downloading')
+    [...directDownloads.values()].some((item) => ['downloading', 'waiting-for-download'].includes(item.status))
 }
 
 function hasHiddenWindow() {
@@ -1367,13 +1457,14 @@ function registerDownloadIpc() {
       throw new Error('Direct game downloads must use a public HTTPS link.')
     }
     const current = directDownloads.get(slug)
-    if (current?.status === 'downloading') return publicDirectDownload(current)
+    if (['downloading', 'waiting-for-download'].includes(current?.status)) return publicDirectDownload(current)
     if (current?.status === 'completed') return publicDirectDownload(current)
 
     const item = {
       id: slug,
       slug,
       title,
+      sourceUrl,
       status: 'downloading',
       fileName: '',
       downloadDirectory,
@@ -1398,6 +1489,10 @@ function registerDownloadIpc() {
     const item = directDownloads.get(safeSlug(id))
     if (!item) throw new Error('Direct download not found.')
     directDownloadControllers.get(item.id)?.abort()
+    const browserItem = directDownloadBrowserItems.get(item.id)
+    if (browserItem) browserItem.cancel()
+    const browser = directDownloadBrowserWindows.get(item.id)
+    if (browser && !browser.isDestroyed()) browser.close()
     const job = directDownloadJobs.get(item.id)
     if (job) await job
     return publicDirectDownload(item)
@@ -1408,6 +1503,16 @@ function registerDownloadIpc() {
     if (!item || item.status !== 'completed' || !item.targetPath) throw new Error('The downloaded file is not ready.')
     const error = await shell.openPath(item.targetPath)
     if (error) throw new Error(error)
+    return { success: true }
+  })
+  ipcMain.handle('downloads:direct-show-page', (event, id) => {
+    requireTrustedFrame(event)
+    const item = directDownloads.get(safeSlug(id))
+    const browser = directDownloadBrowserWindows.get(safeSlug(id))
+    if (!item || item.status !== 'waiting-for-download' || !browser || browser.isDestroyed()) throw new Error('The download page is no longer open.')
+    if (browser.isMinimized()) browser.restore()
+    browser.show()
+    browser.focus()
     return { success: true }
   })
 
@@ -1628,6 +1733,8 @@ app.whenReady().then(async () => {
 app.on('before-quit', (event) => {
   isQuitting = true
   for (const controller of directDownloadControllers.values()) controller.abort()
+  for (const browserItem of directDownloadBrowserItems.values()) browserItem.cancel()
+  for (const browser of directDownloadBrowserWindows.values()) if (!browser.isDestroyed()) browser.close()
   if (downloadTimer) clearInterval(downloadTimer)
   if (!torrentClient || torrentClient.destroyed || shutdownComplete) {
     void persistDownloads()

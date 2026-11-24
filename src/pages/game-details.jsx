@@ -1018,11 +1018,11 @@ function GameDetails() {
                                         <button
                                             type="button"
                                             className="game-action game-download"
-                                            onClick={directDownload?.status === "completed" ? openDirectDownload : startDesktopDirectDownload}
-                                            disabled={directDownloadBusy || directDownload?.status === "downloading"}
+                                            onClick={directDownload?.status === "completed" ? openDirectDownload : ["downloading", "waiting-for-download"].includes(directDownload?.status) ? cancelDirectDownload : startDesktopDirectDownload}
+                                            disabled={directDownloadBusy}
                                         >
                                             <FontAwesomeIcon icon={faDownload} />
-                                            {directDownloadBusy ? "Starting download…" : directDownload?.status === "completed" ? "Open downloaded file" : directDownload?.status === "downloading" ? "Downloading…" : directDownload?.status === "error" ? "Try download again" : "Download Game"}
+                                            {directDownloadBusy ? "Please wait…" : directDownload?.status === "completed" ? "Open downloaded file" : ["downloading", "waiting-for-download"].includes(directDownload?.status) ? "Cancel download" : "Download Game"}
                                         </button>
                                     )
                                 ) : (
@@ -1097,21 +1097,6 @@ function GameDetails() {
                                 {showFollowLoginMessage && <div className="favorite-login-message" role="alert"><span>Please log in to follow this game.</span><button type="button" onClick={() => setShowFollowLoginMessage(false)} aria-label="Dismiss message">×</button></div>}
                             </div>
                         </div>
-                        {window.gameonixDesktop && String(game.fileType || "torrent").toLowerCase() !== "torrent" && directDownload && (
-                            <section className={`game-direct-download-status is-${directDownload.status}`} aria-live="polite">
-                                <div className="game-direct-download-heading">
-                                    <strong>{directDownload.status === "downloading" ? "Downloading directly in GameOnix" : directDownload.status === "completed" ? "Download complete" : directDownload.status === "cancelled" ? "Download cancelled" : "Direct download needs attention"}</strong>
-                                    {directDownload.status === "downloading" && <span>{directDownload.total ? `${Math.round(directDownload.progress * 100)}%` : formatDownloadBytes(directDownload.downloaded)}</span>}
-                                </div>
-                                {directDownload.status === "downloading" && <>
-                                    <div className={`game-direct-download-track${directDownload.total ? "" : " is-indeterminate"}`}><span style={directDownload.total ? { width: `${Math.round(directDownload.progress * 100)}%` } : undefined} /></div>
-                                    <div className="game-direct-download-meta"><span>{formatDownloadBytes(directDownload.downloaded)}{directDownload.total ? ` of ${formatDownloadBytes(directDownload.total)}` : " downloaded"}</span><span>{formatDownloadBytes(directDownload.speed)}/s</span><button type="button" onClick={() => void cancelDirectDownload()} disabled={directDownloadBusy}>{directDownloadBusy ? "Cancelling…" : "Cancel"}</button></div>
-                                </>}
-                                {directDownload.status === "completed" && <div className="game-direct-download-meta"><span title={directDownload.fileName}>{directDownload.fileName}</span><button type="button" onClick={() => void openDirectDownload()}>Open file</button></div>}
-                                {directDownload.status === "error" && <p role="alert">{directDownload.error}</p>}
-                            </section>
-                        )}
-
                         {favoriteError && (
                             <p className="favorite-error" role="alert">
                                 {favoriteError}
