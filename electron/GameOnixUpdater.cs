@@ -72,7 +72,7 @@ internal sealed class GameOnixUpdater : Form
         Controls.Add(progressBar);
 
         detailLabel = new Label();
-        detailLabel.Text = "Keep this window open while GameOnix updates.";
+        detailLabel.Text = "Keep this window open; GameOnix will reopen after verification.";
         detailLabel.ForeColor = Color.FromArgb(161, 153, 178);
         detailLabel.AutoSize = false;
         detailLabel.SetBounds(25, 123, 450, 34);
