@@ -44,6 +44,15 @@ contextBridge.exposeInMainWorld('gameonixDesktop', {
   downloads: {
     list: () => ipcRenderer.invoke('downloads:list'),
     start: (game) => ipcRenderer.invoke('downloads:prepare', game),
+    directList: () => ipcRenderer.invoke('downloads:direct-list'),
+    directStart: (game) => ipcRenderer.invoke('downloads:direct-start', game),
+    directCancel: (id) => ipcRenderer.invoke('downloads:direct-cancel', id),
+    directOpen: (id) => ipcRenderer.invoke('downloads:direct-open', id),
+    onDirectUpdate: (callback) => {
+      const listener = (_event, downloads) => callback(downloads)
+      ipcRenderer.on('downloads:direct-update', listener)
+      return () => ipcRenderer.removeListener('downloads:direct-update', listener)
+    },
     begin: (id, fileIndices) => ipcRenderer.invoke('downloads:begin', { id, fileIndices }),
     pause: (id) => ipcRenderer.invoke('downloads:pause', id),
     resume: (id) => ipcRenderer.invoke('downloads:resume', id),

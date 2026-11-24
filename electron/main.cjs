@@ -30,6 +30,9 @@ const UPDATE_REPOSITORY = 'mhdpstudio/GameOnix-App'
 const UPDATE_ASSET_NAME = 'GameOnix-win-unpacked.zip'
 const windows = new Set()
 const downloads = new Map()
+const directDownloads = new Map()
+const directDownloadControllers = new Map()
+const directDownloadJobs = new Map()
 const activeTorrents = new Map()
 const finalizingTorrents = new Set()
 const speedSamples = new Map()
@@ -607,6 +610,48 @@ function publicDownload(item) {
   }
 }
 
+function publicDirectDownload(item) {
+  return {
+    id: item.id,
+    slug: item.slug,
+    title: item.title,
+    status: item.status,
+    fileName: item.fileName || '',
+    downloaded: Number(item.downloaded) || 0,
+    total: Number(item.total) || 0,
+    progress: Number(item.progress) || 0,
+    speed: Number(item.speed) || 0,
+    error: item.error || '',
+    updatedAt: item.updatedAt || null,
+  }
+}
+
+function publishDirectDownloads() {
+  const snapshot = [...directDownloads.values()].map(publicDirectDownload)
+  for (const window of windows) {
+    if (!window.isDestroyed()) window.webContents.send('downloads:direct-update', snapshot)
+  }
+}
+
+function sanitizeDirectFilename(value, fallback) {
+  let filename = String(value || '').trim()
+  try { filename = decodeURIComponent(filename) } catch {}
+  filename = path.basename(filename).replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/[. ]+$/, '').slice(0, 180)
+  if (!filename || filename === '.' || filename === '..' || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(filename)) return fallback
+  return filename
+}
+
+function getDirectFilename(response, requestUrl, slug) {
+  const disposition = response.headers.get('content-disposition') || ''
+  const encoded = disposition.match(/filename\*\s*=\s*UTF-8''([^;]+)/i)?.[1]
+  const quoted = disposition.match(/filename\s*=\s*"([^"]+)"/i)?.[1]
+  const plain = disposition.match(/filename\s*=\s*([^;]+)/i)?.[1]
+  let fromUrl = ''
+  try { fromUrl = path.posix.basename(new URL(response.url || requestUrl).pathname) } catch {}
+  const fallback = sanitizeDirectFilename(fromUrl, `${slug}.download`)
+  return sanitizeDirectFilename(encoded || quoted || plain || fromUrl, fallback)
+}
+
 function getSnapshot() {
   return [...downloads.values()].map(publicDownload).sort((left, right) => {
     const order = { downloading: 0, starting: 1, paused: 2, error: 3, completed: 4 }
@@ -915,6 +960,98 @@ async function startTorrent(item, { paused = false } = {}) {
   return item
 }
 
+async function performDirectDownload(item, sourceUrl, controller) {
+  const baseDirectory = item.downloadDirectory || downloadDirectory
+  const tempDirectory = path.join(baseDirectory, '.gameonix-direct')
+  const temporaryPath = path.join(tempDirectory, `${item.slug}-${crypto.randomBytes(8).toString('hex')}.part`)
+  item.temporaryPath = temporaryPath
+  try {
+    const response = await net.fetch(sourceUrl, {
+      headers: { Accept: '*/*', 'User-Agent': 'GameOnix-Desktop-Downloader' },
+      signal: controller.signal,
+    })
+    if (!response.ok || !response.body) throw new Error(`The file host returned HTTP ${response.status}.`)
+    const contentType = String(response.headers.get('content-type') || '').toLowerCase()
+    if (contentType.includes('text/html') || contentType.includes('application/xhtml+xml') || contentType.includes('application/json')) {
+      await response.body.cancel().catch(() => {})
+      throw new Error('This link opens a web page, not a direct file. Use a direct download URL for this game.')
+    }
+    const finalUrl = new URL(response.url || sourceUrl)
+    if (finalUrl.protocol !== 'https:') {
+      await response.body.cancel().catch(() => {})
+      throw new Error('Direct downloads must use a secure HTTPS link.')
+    }
+
+    item.fileName = getDirectFilename(response, sourceUrl, item.slug)
+    item.total = Number(response.headers.get('content-length')) || 0
+    const targetDirectory = path.join(baseDirectory, item.slug)
+    await fs.mkdir(targetDirectory, { recursive: true })
+    await fs.mkdir(tempDirectory, { recursive: true })
+    let targetPath = path.join(targetDirectory, item.fileName)
+    if (fsSync.existsSync(targetPath)) {
+      const extension = path.extname(item.fileName)
+      const baseName = path.basename(item.fileName, extension)
+      let suffix = 1
+      while (fsSync.existsSync(targetPath)) {
+        targetPath = path.join(targetDirectory, `${baseName} (${suffix})${extension}`)
+        suffix += 1
+      }
+      item.fileName = path.basename(targetPath)
+    }
+
+    let receivedBytes = 0
+    let lastSampleAt = Date.now()
+    let lastSampleBytes = 0
+    let lastPublishedAt = 0
+    const progressStream = new Transform({
+      transform(chunk, _encoding, callback) {
+        receivedBytes += chunk.length
+        const now = Date.now()
+        if (now - lastSampleAt >= 1000) {
+          item.speed = Math.max(0, (receivedBytes - lastSampleBytes) / ((now - lastSampleAt) / 1000))
+          lastSampleAt = now
+          lastSampleBytes = receivedBytes
+        }
+        item.downloaded = receivedBytes
+        item.progress = item.total ? Math.min(1, receivedBytes / item.total) : 0
+        item.updatedAt = new Date().toISOString()
+        if (now - lastPublishedAt >= 200) {
+          lastPublishedAt = now
+          publishDirectDownloads()
+        }
+        callback(null, chunk)
+      },
+    })
+
+    await fs.mkdir(path.dirname(temporaryPath), { recursive: true })
+    await pipeline(Readable.fromWeb(response.body), progressStream, fsSync.createWriteStream(temporaryPath, { flags: 'wx' }), { signal: controller.signal })
+    if (controller.signal.aborted) throw new Error('Download cancelled.')
+    if (item.total && receivedBytes !== item.total) throw new Error('The downloaded file was incomplete. Try again.')
+    if (!receivedBytes) throw new Error('The file host returned an empty file.')
+    await fs.rename(temporaryPath, targetPath)
+    item.targetPath = targetPath
+    item.downloaded = receivedBytes
+    item.total = item.total || receivedBytes
+    item.progress = 1
+    item.speed = 0
+    item.status = 'completed'
+    item.error = ''
+    item.updatedAt = new Date().toISOString()
+  } catch (error) {
+    await fs.rm(temporaryPath, { force: true }).catch(() => {})
+    item.speed = 0
+    item.status = controller.signal.aborted ? 'cancelled' : 'error'
+    item.error = controller.signal.aborted ? '' : (error?.message || 'The direct download failed.')
+    item.updatedAt = new Date().toISOString()
+  } finally {
+    item.temporaryPath = ''
+    directDownloadControllers.delete(item.id)
+    directDownloadJobs.delete(item.id)
+    publishDirectDownloads()
+    syncTray()
+  }
+}
+
 async function loadDownloadState() {
   settingsPath = path.join(app.getPath('userData'), 'gameonix-downloads.json')
   authSessionPath = path.join(app.getPath('userData'), 'gameonix-session-token.bin')
@@ -945,6 +1082,7 @@ async function loadDownloadState() {
     downloadDirectory = defaultDirectory
   }
   await fs.mkdir(downloadDirectory, { recursive: true })
+  await fs.rm(path.join(downloadDirectory, '.gameonix-direct'), { recursive: true, force: true }).catch(() => {})
 }
 
 function getAppIconPath() {
@@ -964,7 +1102,8 @@ function getMainWindow() {
 }
 
 function hasActiveDownloads() {
-  return [...downloads.values()].some((item) => ['downloading', 'starting', 'finalizing'].includes(item.status))
+  return [...downloads.values()].some((item) => ['downloading', 'starting', 'finalizing'].includes(item.status)) ||
+    [...directDownloads.values()].some((item) => item.status === 'downloading')
 }
 
 function hasHiddenWindow() {
@@ -1213,6 +1352,65 @@ function registerDownloadIpc() {
     return { ...appSettings, downloadDirectory, version: app.getVersion() }
   })
 
+  ipcMain.handle('downloads:direct-list', (event) => {
+    requireTrustedFrame(event)
+    return [...directDownloads.values()].map(publicDirectDownload)
+  })
+  ipcMain.handle('downloads:direct-start', (event, game = {}) => {
+    requireTrustedFrame(event)
+    const slug = safeSlug(game.slug)
+    const title = String(game.title || '').trim().slice(0, 160) || slug
+    const sourceUrl = String(game.url || '').trim()
+    let parsedUrl
+    try { parsedUrl = new URL(sourceUrl) } catch { throw new Error('This game does not have a valid direct download URL.') }
+    if (parsedUrl.protocol !== 'https:' || parsedUrl.username || parsedUrl.password) {
+      throw new Error('Direct game downloads must use a public HTTPS link.')
+    }
+    const current = directDownloads.get(slug)
+    if (current?.status === 'downloading') return publicDirectDownload(current)
+    if (current?.status === 'completed') return publicDirectDownload(current)
+
+    const item = {
+      id: slug,
+      slug,
+      title,
+      status: 'downloading',
+      fileName: '',
+      downloadDirectory,
+      downloaded: 0,
+      total: 0,
+      progress: 0,
+      speed: 0,
+      error: '',
+      updatedAt: new Date().toISOString(),
+    }
+    const controller = new AbortController()
+    directDownloads.set(slug, item)
+    directDownloadControllers.set(slug, controller)
+    publishDirectDownloads()
+    syncTray()
+    const job = performDirectDownload(item, sourceUrl, controller)
+    directDownloadJobs.set(slug, job)
+    return publicDirectDownload(item)
+  })
+  ipcMain.handle('downloads:direct-cancel', async (event, id) => {
+    requireTrustedFrame(event)
+    const item = directDownloads.get(safeSlug(id))
+    if (!item) throw new Error('Direct download not found.')
+    directDownloadControllers.get(item.id)?.abort()
+    const job = directDownloadJobs.get(item.id)
+    if (job) await job
+    return publicDirectDownload(item)
+  })
+  ipcMain.handle('downloads:direct-open', async (event, id) => {
+    requireTrustedFrame(event)
+    const item = directDownloads.get(safeSlug(id))
+    if (!item || item.status !== 'completed' || !item.targetPath) throw new Error('The downloaded file is not ready.')
+    const error = await shell.openPath(item.targetPath)
+    if (error) throw new Error(error)
+    return { success: true }
+  })
+
   ipcMain.handle('downloads:list', (event) => { requireTrustedFrame(event); return getSnapshot() })
   ipcMain.handle('downloads:get-directory', (event) => { requireTrustedFrame(event); return downloadDirectory })
   ipcMain.handle('downloads:choose-directory', async (event) => {
@@ -1429,6 +1627,7 @@ app.whenReady().then(async () => {
 
 app.on('before-quit', (event) => {
   isQuitting = true
+  for (const controller of directDownloadControllers.values()) controller.abort()
   if (downloadTimer) clearInterval(downloadTimer)
   if (!torrentClient || torrentClient.destroyed || shutdownComplete) {
     void persistDownloads()

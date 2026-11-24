@@ -206,6 +206,8 @@ function GameDetails() {
     const [favoriteBusy, setFavoriteBusy] = useState(false);
     const [favoriteError, setFavoriteError] = useState("");
     const [downloadStarting, setDownloadStarting] = useState(false);
+    const [directDownload, setDirectDownload] = useState(null);
+    const [directDownloadBusy, setDirectDownloadBusy] = useState(false);
     const [downloadDialogOpen, setDownloadDialogOpen] = useState(false);
     const [downloadDialogId, setDownloadDialogId] = useState("");
     const [downloadDialogInfo, setDownloadDialogInfo] = useState(null);
@@ -245,6 +247,55 @@ function GameDetails() {
             void alert({ title: "Download could not start", message: reason?.message || "Try again from the game page." });
         } finally {
             setDownloadStarting(false);
+        }
+    }
+
+    useEffect(() => {
+        const desktop = window.gameonixDesktop;
+        if (!desktop || !game?.slug) return undefined;
+        let active = true;
+        const sync = (items) => {
+            if (active) setDirectDownload(items.find((item) => item.id === game.slug) || null);
+        };
+        const unsubscribe = desktop.downloads.onDirectUpdate(sync);
+        desktop.downloads.directList().then(sync).catch(() => {});
+        return () => { active = false; unsubscribe(); };
+    }, [game?.slug]);
+
+    async function startDesktopDirectDownload() {
+        if (!window.gameonixDesktop || !game) return;
+        setDirectDownloadBusy(true);
+        try {
+            const settings = await window.gameonixDesktop.settings.get();
+            setDownloadTargetDirectory(settings.downloadDirectory || "");
+            const item = await window.gameonixDesktop.downloads.directStart({ slug: game.slug, title: game.title, url: game.gameLink });
+            setDirectDownload(item);
+            if (item.status === "downloading") void recordGameActivity(game.slug, "download").catch(() => {});
+        } catch (reason) {
+            setDirectDownload({ id: game.slug, status: "error", error: reason?.message || "The direct download could not start." });
+        } finally {
+            setDirectDownloadBusy(false);
+        }
+    }
+
+    async function cancelDirectDownload() {
+        if (!game?.slug || !window.gameonixDesktop) return;
+        setDirectDownloadBusy(true);
+        try {
+            setDirectDownload(await window.gameonixDesktop.downloads.directCancel(game.slug));
+        } catch (reason) {
+            setDirectDownload((current) => ({ ...current, status: "error", error: reason?.message || "The download could not be cancelled." }));
+        } finally {
+            setDirectDownloadBusy(false);
+        }
+    }
+
+    async function openDirectDownload() {
+        if (!game?.slug || !window.gameonixDesktop) return;
+        try {
+            await window.gameonixDesktop.downloads.directOpen(game.slug);
+        } catch (reason) {
+            setDirectDownload((current) => ({ ...current, error: reason?.message || "The downloaded file could not be opened." }));
         }
     }
 
@@ -957,27 +1008,28 @@ function GameDetails() {
 
                         <div className="game-actions-row">
                             {game.availability !== false && game.gameLink ? (
-                                window.gameonixDesktop && String(game.fileType || "torrent").toLowerCase() === "torrent" ? (
-                                    <button
-                                        type="button"
-                                        className="game-action game-download"
-                                        onClick={startDesktopDownload}
-                                        disabled={downloadStarting}
-                                    >
-                                        <FontAwesomeIcon icon={faDownload} />
-                                        {downloadStarting ? "Starting download..." : "Download Game"}
-                                    </button>
+                                window.gameonixDesktop ? (
+                                    String(game.fileType || "torrent").toLowerCase() === "torrent" ? (
+                                        <button type="button" className="game-action game-download" onClick={startDesktopDownload} disabled={downloadStarting}>
+                                            <FontAwesomeIcon icon={faDownload} />
+                                            {downloadStarting ? "Starting download..." : "Download Game"}
+                                        </button>
+                                    ) : (
+                                        <button
+                                            type="button"
+                                            className="game-action game-download"
+                                            onClick={directDownload?.status === "completed" ? openDirectDownload : startDesktopDirectDownload}
+                                            disabled={directDownloadBusy || directDownload?.status === "downloading"}
+                                        >
+                                            <FontAwesomeIcon icon={faDownload} />
+                                            {directDownloadBusy ? "Starting download…" : directDownload?.status === "completed" ? "Open downloaded file" : directDownload?.status === "downloading" ? "Downloading…" : directDownload?.status === "error" ? "Try download again" : "Download Game"}
+                                        </button>
+                                    )
                                 ) : (
-                                <a
-                                    className="game-action game-download"
-                                    href={game.gameLink}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    onClick={() => { void recordGameActivity(game.slug, "download").catch(() => {}); }}
-                                >
-                                    <FontAwesomeIcon icon={faDownload} />
-                                    Download Game
-                                </a>
+                                    <a className="game-action game-download" href={game.gameLink} target="_blank" rel="noopener noreferrer" onClick={() => { void recordGameActivity(game.slug, "download").catch(() => {}); }}>
+                                        <FontAwesomeIcon icon={faDownload} />
+                                        Download Game
+                                    </a>
                                 )
                             ) : (
                                 <button
@@ -1045,6 +1097,20 @@ function GameDetails() {
                                 {showFollowLoginMessage && <div className="favorite-login-message" role="alert"><span>Please log in to follow this game.</span><button type="button" onClick={() => setShowFollowLoginMessage(false)} aria-label="Dismiss message">×</button></div>}
                             </div>
                         </div>
+                        {window.gameonixDesktop && String(game.fileType || "torrent").toLowerCase() !== "torrent" && directDownload && (
+                            <section className={`game-direct-download-status is-${directDownload.status}`} aria-live="polite">
+                                <div className="game-direct-download-heading">
+                                    <strong>{directDownload.status === "downloading" ? "Downloading directly in GameOnix" : directDownload.status === "completed" ? "Download complete" : directDownload.status === "cancelled" ? "Download cancelled" : "Direct download needs attention"}</strong>
+                                    {directDownload.status === "downloading" && <span>{directDownload.total ? `${Math.round(directDownload.progress * 100)}%` : formatDownloadBytes(directDownload.downloaded)}</span>}
+                                </div>
+                                {directDownload.status === "downloading" && <>
+                                    <div className={`game-direct-download-track${directDownload.total ? "" : " is-indeterminate"}`}><span style={directDownload.total ? { width: `${Math.round(directDownload.progress * 100)}%` } : undefined} /></div>
+                                    <div className="game-direct-download-meta"><span>{formatDownloadBytes(directDownload.downloaded)}{directDownload.total ? ` of ${formatDownloadBytes(directDownload.total)}` : " downloaded"}</span><span>{formatDownloadBytes(directDownload.speed)}/s</span><button type="button" onClick={() => void cancelDirectDownload()} disabled={directDownloadBusy}>{directDownloadBusy ? "Cancelling…" : "Cancel"}</button></div>
+                                </>}
+                                {directDownload.status === "completed" && <div className="game-direct-download-meta"><span title={directDownload.fileName}>{directDownload.fileName}</span><button type="button" onClick={() => void openDirectDownload()}>Open file</button></div>}
+                                {directDownload.status === "error" && <p role="alert">{directDownload.error}</p>}
+                            </section>
+                        )}
 
                         {favoriteError && (
                             <p className="favorite-error" role="alert">
