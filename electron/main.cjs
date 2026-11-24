@@ -297,6 +297,38 @@ function compareVersions(left, right) {
   return 0
 }
 
+async function fetchLatestReleaseFromGitHubPage() {
+  const latestUrl = `https://github.com/${UPDATE_REPOSITORY}/releases/latest`
+  const response = await net.fetch(latestUrl, {
+    headers: { Accept: 'text/html', 'User-Agent': 'GameOnix-Desktop-Updater' },
+  })
+  if (!response.ok) throw new Error(`GitHub release page returned ${response.status}.`)
+  const finalUrl = response.url || latestUrl
+  let tag = ''
+  try {
+    tag = new URL(finalUrl).pathname.match(/\/releases\/tag\/(v?\d+\.\d+\.\d+(?:[-+][\w.-]+)?)$/i)?.[1] || ''
+  } catch {}
+  if (!tag) {
+    const html = await response.text()
+    const escapedRepository = UPDATE_REPOSITORY.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    tag = html.match(new RegExp(`/${escapedRepository}/releases/tag/(v?\\d+\\.\\d+\\.\\d+(?:[-+][\\w.-]+)?)`, 'i'))?.[1] || ''
+  }
+  const version = tag.replace(/^v/i, '')
+  if (!/^\d+\.\d+\.\d+(?:[-+][\w.-]+)?$/.test(version)) {
+    throw new Error('Could not read the latest version from the GitHub Releases page.')
+  }
+  const encodedTag = encodeURIComponent(tag)
+  return {
+    tag_name: tag,
+    assets: [{
+      name: UPDATE_ASSET_NAME,
+      browser_download_url: `https://github.com/${UPDATE_REPOSITORY}/releases/download/${encodedTag}/${encodeURIComponent(UPDATE_ASSET_NAME)}`,
+      size: 0,
+      digest: '',
+    }],
+  }
+}
+
 async function checkForUpdates() {
   if (!app.isPackaged) return { status: 'development', currentVersion: app.getVersion() }
   if (updateCheckPromise) return updateCheckPromise
@@ -306,8 +338,14 @@ async function checkForUpdates() {
       const response = await net.fetch(`https://api.github.com/repos/${UPDATE_REPOSITORY}/releases/latest`, {
         headers: { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'GameOnix-Desktop-Updater' },
       })
-      if (!response.ok) throw new Error(`GitHub returned ${response.status} while checking for updates.`)
-      const release = await response.json()
+      let release
+      if (response.ok) {
+        release = await response.json()
+      } else if (response.status === 403 || response.status === 429) {
+        release = await fetchLatestReleaseFromGitHubPage()
+      } else {
+        throw new Error(`GitHub returned ${response.status} while checking for updates.`)
+      }
       const version = String(release.tag_name || '').replace(/^v/i, '')
       if (!/^\d+\.\d+\.\d+(?:[-+][\w.-]+)?$/.test(version)) throw new Error('The latest GitHub release has an invalid version tag.')
       if (compareVersions(version, app.getVersion()) <= 0) {
@@ -323,7 +361,7 @@ async function checkForUpdates() {
       if (!asset.browser_download_url.startsWith(`https://github.com/${UPDATE_REPOSITORY}/releases/download/`)) {
         throw new Error('The update archive URL is not from the configured GitHub repository.')
       }
-      if (!/^sha256:[a-f0-9]{64}$/i.test(asset.digest || '')) throw new Error('GitHub did not provide a SHA-256 digest for the update archive.')
+      if (asset.digest && !/^sha256:[a-f0-9]{64}$/i.test(asset.digest)) throw new Error('GitHub returned an invalid SHA-256 digest for the update archive.')
       setUpdaterState({ status: 'available', availableVersion: version, progress: 0, error: '' })
       void downloadAndInstallUpdate(asset, version)
       return updaterState
@@ -548,16 +586,22 @@ async function downloadAndInstallUpdate(asset, version) {
     const archivePath = path.join(updateDirectory, `GameOnix-${version}-win-unpacked.zip`)
     const partialArchivePath = `${archivePath}.partial`
     try {
-      const expectedDigest = asset.digest.slice('sha256:'.length).toLowerCase()
+      const expectedDigest = /^sha256:[a-f0-9]{64}$/i.test(asset.digest || '')
+        ? asset.digest.slice('sha256:'.length).toLowerCase()
+        : ''
+      const localDigestPath = `${archivePath}.sha256`
       await fs.mkdir(updateDirectory, { recursive: true })
 
       let cachedArchiveIsValid = false
       try {
         const cached = await fs.stat(archivePath)
-        if ((!asset.size || cached.size === Number(asset.size)) && await sha256File(archivePath) === expectedDigest) {
+        const actualCachedDigest = await sha256File(archivePath)
+        const trustedCachedDigest = expectedDigest || (await fs.readFile(localDigestPath, 'utf8').catch(() => '')).trim()
+        if ((!asset.size || cached.size === Number(asset.size)) && trustedCachedDigest && actualCachedDigest === trustedCachedDigest) {
           cachedArchiveIsValid = true
         } else {
           await fs.rm(archivePath, { force: true })
+          await fs.rm(localDigestPath, { force: true })
         }
       } catch {}
 
@@ -589,8 +633,11 @@ async function downloadAndInstallUpdate(asset, version) {
           },
         })
         await pipeline(Readable.fromWeb(response.body), progressStream, fsSync.createWriteStream(partialArchivePath))
-        if (hash.digest('hex').toLowerCase() !== expectedDigest) throw new Error('The update archive failed its SHA-256 integrity check.')
+        const downloadedDigest = hash.digest('hex').toLowerCase()
+        if (expectedDigest && downloadedDigest !== expectedDigest) throw new Error('The update archive failed its SHA-256 integrity check.')
+        if (totalBytes && receivedBytes !== totalBytes) throw new Error('The update archive download was incomplete.')
         await fs.rename(partialArchivePath, archivePath)
+        if (!expectedDigest) await fs.writeFile(localDigestPath, downloadedDigest, 'utf8')
       }
       pendingPortableUpdate = { archivePath, version }
       setUpdaterState({ status: 'ready', progress: 100, availableVersion: version, error: '' })
