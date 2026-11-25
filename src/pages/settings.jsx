@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faArrowDown, faArrowRotateRight, faBell, faCheck, faFolderOpen, faGear, faLaptop, faRocket } from "@fortawesome/free-solid-svg-icons";
+import { faArrowDown, faArrowRotateRight, faBell, faCheck, faChevronDown, faFolderOpen, faGear, faLaptop, faRocket } from "@fortawesome/free-solid-svg-icons";
 import "../style/settings-style.css";
 
 function SwitchRow({ title, description, checked, onChange, disabled = false }) {
@@ -14,12 +14,70 @@ function SwitchRow({ title, description, checked, onChange, disabled = false }) 
 const SPEED_LIMITS = Array.from({ length: 20 }, (_, index) => (index + 1) / 2);
 
 function SpeedLimitRow({ title, description, value, onChange, disabled }) {
-  return <div className="settings-speed-row">
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const pickerRef = useRef(null);
+  const optionRefs = useRef([]);
+  const options = [0, ...SPEED_LIMITS];
+  const selectedIndex = Math.max(0, options.indexOf(Number(value) || 0));
+  const selectedLabel = selectedIndex === 0 ? "Unlimited" : `${Number(value).toFixed(1)} MB/s`;
+
+  useEffect(() => {
+    if (open) optionRefs.current[activeIndex]?.focus();
+  }, [open, activeIndex]);
+
+  function showOptions(index = selectedIndex) {
+    setActiveIndex(index);
+    setOpen(true);
+  }
+
+  function chooseOption(index) {
+    const nextValue = options[index];
+    if (nextValue !== undefined) onChange(nextValue);
+    setOpen(false);
+    pickerRef.current?.querySelector(".settings-speed-trigger")?.focus();
+  }
+
+  function handleOptionKeyDown(event, index) {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      setActiveIndex((index + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length);
+    } else if (event.key === "Home" || event.key === "End") {
+      event.preventDefault();
+      setActiveIndex(event.key === "Home" ? 0 : options.length - 1);
+    } else if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      chooseOption(index);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      setOpen(false);
+      pickerRef.current?.querySelector(".settings-speed-trigger")?.focus();
+    }
+  }
+
+  return <div className={`settings-speed-row${open ? " is-open" : ""}`}>
     <div><strong>{title}</strong><p>{description}</p></div>
-    <label className="settings-speed-select-label"><select className="settings-speed-select" aria-label={title} value={Number(value) || 0} onChange={(event) => onChange(Number(event.target.value))} disabled={disabled}>
-      <option value="0">Unlimited</option>
-      {SPEED_LIMITS.map((limit) => <option key={limit} value={limit}>{limit.toFixed(1)} MB/s</option>)}
-    </select></label>
+    <div className={`settings-speed-picker${open ? " is-open" : ""}`} ref={pickerRef} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}>
+      <button type="button" className="settings-speed-trigger" aria-label={`${title}: ${selectedLabel}`} aria-haspopup="listbox" aria-expanded={open} onClick={() => open ? setOpen(false) : showOptions()} onKeyDown={(event) => {
+        if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          showOptions(selectedIndex);
+        }
+      }} disabled={disabled}>
+        <span>{selectedLabel}</span><FontAwesomeIcon icon={faChevronDown} aria-hidden="true" />
+      </button>
+      {open && <div className="settings-speed-menu" role="listbox" aria-label={title}>
+        <div className="settings-speed-menu-heading"><span>DOWNLOAD SPEED</span><small>MB/s</small></div>
+        {options.map((limit, index) => {
+          const selected = index === selectedIndex;
+          return <div key={limit} ref={(element) => { optionRefs.current[index] = element; }} role="option" aria-selected={selected} tabIndex={activeIndex === index ? 0 : -1} className={`settings-speed-option${selected ? " is-selected" : ""}`} onFocus={() => setActiveIndex(index)} onClick={() => chooseOption(index)} onKeyDown={(event) => handleOptionKeyDown(event, index)}>
+            <span className="settings-speed-option-mark">{selected && <FontAwesomeIcon icon={faCheck} aria-hidden="true" />}</span>
+            <span>{limit === 0 ? "Unlimited" : `${limit.toFixed(1)} MB/s`}</span>
+            {limit === 0 && <small>No speed cap</small>}
+          </div>;
+        })}
+      </div>}
+    </div>
   </div>;
 }
 
