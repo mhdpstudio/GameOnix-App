@@ -16,6 +16,12 @@
 .settings-switch.is-on { border-color: #8f70f1; background: #704de1; }
 .settings-switch.is-on > span { transform: translateX(19px); background: white; }
 .settings-switch:disabled { opacity: .5; cursor: wait; }
+.settings-speed-row { display: flex; align-items: center; justify-content: space-between; gap: 24px; min-height: 83px; padding: 17px 0; border-bottom: 1px solid #292731; }
+.settings-speed-row strong { font-size: 13px; }
+.settings-speed-row p { max-width: 680px; margin: 5px 0 0; color: #918c9c; font-size: 12px; line-height: 1.65; }
+.settings-speed-select { min-width: 150px; min-height: 40px; padding: 0 34px 0 12px; border: 1px solid #443c56; border-radius: 10px; background: #17151e; color: #e9e4f4; font: inherit; font-size: 12px; cursor: pointer; }
+.settings-speed-select:focus { outline: 2px solid #8f70f1; outline-offset: 2px; }
+.settings-speed-select:disabled { opacity: .5; cursor: wait; }
 .settings-folder-row code { display: block; max-width: min(700px, 62vw); overflow: hidden; margin-top: 10px; color: #b6a9d7; font-family: inherit; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .settings-secondary-button { display: inline-flex; min-height: 40px; flex: 0 0 auto; align-items: center; justify-content: center; gap: 9px; padding: 0 14px; border: 1px solid #443c56; border-radius: 10px; background: #201d29; color: #e9e4f4; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
 .settings-secondary-button:hover:not(:disabled) { border-color: #9476ed; background: #292336; }
@@ -46,7 +52,7 @@
 @media (max-width: 720px) {
   .settings-page { padding-top: 0; }
   .settings-panel { padding: 18px 17px 5px; }
-  .settings-folder-row, .settings-update-actions { align-items: flex-start; flex-direction: column; }
+  .settings-folder-row, .settings-speed-row, .settings-update-actions { align-items: flex-start; flex-direction: column; }
   .settings-folder-row code { max-width: calc(100vw - 80px); }
   .settings-update-version { align-items: flex-start; flex-wrap: wrap; }
   .settings-update-badge { margin-left: 54px; }

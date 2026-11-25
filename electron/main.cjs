@@ -60,6 +60,46 @@ let appSettings = {
   closeToTray: true,
   launchAtStartup: false,
   askBeforeDownload: true,
+  directSpeedLimit: 0,
+  torrentSpeedLimit: 0,
+}
+let nextDirectThrottleAt = 0
+
+function getSpeedLimitBytesPerSecond(settingName) {
+  const limit = Number(appSettings[settingName]) || 0
+  return limit > 0 ? Math.round(limit * 1024 * 1024) : -1
+}
+
+function applyTorrentSpeedLimit() {
+  if (!torrentClient || typeof torrentClient.throttleDownload !== 'function') return
+  torrentClient.throttleDownload(getSpeedLimitBytesPerSecond('torrentSpeedLimit'))
+}
+
+async function throttleDirectChunk(byteCount, signal) {
+  const limit = getSpeedLimitBytesPerSecond('directSpeedLimit')
+  if (limit < 0) {
+    nextDirectThrottleAt = 0
+    return
+  }
+  const now = Date.now()
+  const scheduledAt = Math.max(now, nextDirectThrottleAt)
+  nextDirectThrottleAt = scheduledAt + (byteCount / limit) * 1000
+  const waitMs = nextDirectThrottleAt - now
+  if (waitMs <= 0) return
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(done, waitMs)
+    function done() {
+      signal.removeEventListener('abort', abort)
+      resolve()
+    }
+    function abort() {
+      clearTimeout(timer)
+      signal.removeEventListener('abort', abort)
+      reject(new Error('Download cancelled.'))
+    }
+    if (signal.aborted) return abort()
+    signal.addEventListener('abort', abort, { once: true })
+  })
 }
 let updaterState = { status: 'idle', currentVersion: app.getVersion(), availableVersion: '', progress: 0, error: '' }
 
@@ -659,58 +699,22 @@ async function openDirectDownloadPage(item) {
   const browserSession = browser.webContents.session
   const onWillDownload = (event, downloadItem, contents) => {
     if (browser.isDestroyed() || contents.id !== browser.webContents.id) return
+    event.preventDefault()
     const filename = sanitizeDirectFilename(downloadItem.getFilename(), `${item.slug}.download`)
-    const targetPath = nextDirectTargetPath(targetDirectory, filename)
-    item.fileName = path.basename(targetPath)
-    item.targetPath = targetPath
-    item.total = Number(downloadItem.getTotalBytes()) || 0
-    item.downloaded = Number(downloadItem.getReceivedBytes()) || 0
-    item.progress = item.total ? Math.min(1, item.downloaded / item.total) : 0
+    item.fileName = filename
+    item.total = 0
+    item.downloaded = 0
+    item.progress = 0
     item.status = 'downloading'
     item.error = ''
     item.updatedAt = new Date().toISOString()
-    downloadItem.setSavePath(targetPath)
-    directDownloadBrowserItems.set(item.id, downloadItem)
-    let previousBytes = item.downloaded
-    let previousSampleAt = Date.now()
     publishDirectDownloads()
     syncTray()
-    downloadItem.on('updated', (_event, state) => {
-      if (directDownloads.get(item.id) !== item) return
-      if (state === 'interrupted') {
-        item.status = downloadItem.canResume() ? 'paused' : 'error'
-        item.speed = 0
-        item.error = downloadItem.canResume() ? 'The connection paused. Resume to continue downloading.' : 'The file host interrupted the download.'
-      }
-      else if (downloadItem.isPaused()) item.status = 'paused'
-      else item.status = 'downloading'
-      item.downloaded = Number(downloadItem.getReceivedBytes()) || 0
-      item.total = Number(downloadItem.getTotalBytes()) || item.total
-      item.progress = item.total ? Math.min(1, item.downloaded / item.total) : 0
-      const now = Date.now()
-      if (now - previousSampleAt >= 1000) {
-        item.speed = Math.max(0, (item.downloaded - previousBytes) / ((now - previousSampleAt) / 1000))
-        previousBytes = item.downloaded
-        previousSampleAt = now
-      }
-      item.etaSeconds = item.speed > 0 && item.total > item.downloaded ? Math.ceil((item.total - item.downloaded) / item.speed) : null
-      item.updatedAt = new Date().toISOString()
-      publishDirectDownloads()
-    })
-    downloadItem.on('done', (_event, state) => {
-      directDownloadBrowserItems.delete(item.id)
-      item.downloaded = Number(downloadItem.getReceivedBytes()) || 0
-      item.total = Number(downloadItem.getTotalBytes()) || item.total || item.downloaded
-      item.progress = state === 'completed' ? 1 : (item.total ? Math.min(1, item.downloaded / item.total) : 0)
-      item.status = state === 'completed' ? 'completed' : state === 'cancelled' ? 'cancelled' : 'error'
-      item.speed = 0
-      item.etaSeconds = null
-      item.error = state === 'completed' || state === 'cancelled' ? '' : 'The file host interrupted the download. Try again.'
-      item.updatedAt = new Date().toISOString()
-      publishDirectDownloads()
-      syncTray()
-      if (!browser.isDestroyed()) browser.close()
-    })
+    const controller = directDownloadControllers.get(item.id) || new AbortController()
+    directDownloadControllers.set(item.id, controller)
+    const job = performDirectDownload(item, downloadItem.getURL(), controller, browserSession.fetch.bind(browserSession), { pageFallback: false })
+      .finally(() => { if (!browser.isDestroyed()) browser.close() })
+    directDownloadJobs.set(item.id, job)
   }
   browserSession.on('will-download', onWillDownload)
   browser.webContents.setWindowOpenHandler(({ url }) => {
@@ -835,6 +839,7 @@ async function ensureTorrentClient() {
   const { default: WebTorrent } = await import('webtorrent')
   const announce = await loadSupplementalTrackers()
   torrentClient = new WebTorrent({ maxConns: 160, tracker: { announce }, natUpnp: true, natPmp: true, utp: true, utPex: true, lsd: true })
+  applyTorrentSpeedLimit()
   torrentClient.on('error', (error) => console.error('Torrent client error:', error))
   return torrentClient
 }
@@ -1102,13 +1107,13 @@ async function startTorrent(item, { paused = false } = {}) {
   return item
 }
 
-async function performDirectDownload(item, sourceUrl, controller) {
+async function performDirectDownload(item, sourceUrl, controller, fetcher = net.fetch, { pageFallback = true } = {}) {
   const baseDirectory = item.downloadDirectory || downloadDirectory
   const tempDirectory = path.join(baseDirectory, '.gameonix-direct')
   const temporaryPath = path.join(tempDirectory, `${item.slug}-${crypto.randomBytes(8).toString('hex')}.part`)
   item.temporaryPath = temporaryPath
   try {
-    const response = await net.fetch(sourceUrl, {
+    const response = await fetcher(sourceUrl, {
       headers: { Accept: '*/*', 'User-Agent': 'GameOnix-Desktop-Downloader' },
       signal: controller.signal,
     })
@@ -1116,6 +1121,7 @@ async function performDirectDownload(item, sourceUrl, controller) {
     const contentType = String(response.headers.get('content-type') || '').toLowerCase()
     if (contentType.includes('text/html') || contentType.includes('application/xhtml+xml') || contentType.includes('application/json')) {
       await response.body.cancel().catch(() => {})
+      if (!pageFallback) throw new Error('The file host returned a web page instead of a direct file.')
       await openDirectDownloadPage(item)
       return
     }
@@ -1141,6 +1147,8 @@ async function performDirectDownload(item, sourceUrl, controller) {
       transform(chunk, _encoding, callback) {
         void (async () => {
           await waitForDirectResume(item, controller.signal)
+          if (controller.signal.aborted) throw new Error('Download cancelled.')
+          await throttleDirectChunk(chunk.length, controller.signal)
           if (controller.signal.aborted) throw new Error('Download cancelled.')
           receivedBytes += chunk.length
           const now = Date.now()
@@ -1203,6 +1211,10 @@ async function loadDownloadState() {
     downloadDirectory = state.downloadDirectory || defaultDirectory
     if (state.settings && typeof state.settings === 'object') {
       appSettings = { ...appSettings, ...state.settings }
+      for (const key of ['directSpeedLimit', 'torrentSpeedLimit']) {
+        const value = Number(appSettings[key])
+        appSettings[key] = Number.isFinite(value) && value >= 0 && value <= 10 && Number.isInteger(value * 2) ? value : 0
+      }
     }
     for (const saved of Array.isArray(state.downloads) ? state.downloads : []) {
       const id = safeSlug(saved.id)
@@ -1487,6 +1499,12 @@ function registerDownloadIpc() {
     for (const key of ['closeToTray', 'launchAtStartup', 'askBeforeDownload']) {
       if (typeof patch[key] === 'boolean') appSettings[key] = patch[key]
     }
+    for (const key of ['directSpeedLimit', 'torrentSpeedLimit']) {
+      const value = Number(patch[key])
+      if (Number.isFinite(value) && value >= 0 && value <= 10 && Number.isInteger(value * 2)) appSettings[key] = value
+    }
+    if (Object.hasOwn(patch, 'directSpeedLimit')) nextDirectThrottleAt = 0
+    if (Object.hasOwn(patch, 'torrentSpeedLimit')) applyTorrentSpeedLimit()
     applyStartupSetting()
     syncTray()
     await persistDownloads()

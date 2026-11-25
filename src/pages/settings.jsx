@@ -11,6 +11,18 @@ function SwitchRow({ title, description, checked, onChange, disabled = false }) 
   </div>;
 }
 
+const SPEED_LIMITS = Array.from({ length: 20 }, (_, index) => (index + 1) / 2);
+
+function SpeedLimitRow({ title, description, value, onChange, disabled }) {
+  return <div className="settings-speed-row">
+    <div><strong>{title}</strong><p>{description}</p></div>
+    <label className="settings-speed-select-label"><select className="settings-speed-select" aria-label={title} value={Number(value) || 0} onChange={(event) => onChange(Number(event.target.value))} disabled={disabled}>
+      <option value="0">Unlimited</option>
+      {SPEED_LIMITS.map((limit) => <option key={limit} value={limit}>{limit.toFixed(1)} MB/s</option>)}
+    </select></label>
+  </div>;
+}
+
 const UPDATE_LABELS = {
   idle: "Updates are checked automatically",
   checking: "Checking GitHub for a new version…",
@@ -117,6 +129,8 @@ export default function Settings() {
     <section className="settings-panel" aria-labelledby="settings-downloads-title">
       <header className="settings-panel-heading"><span><FontAwesomeIcon icon={faArrowDown} /></span><div><h2 id="settings-downloads-title">Downloads</h2><p>Pick a save location and choose when downloads start.</p></div></header>
       <SwitchRow title="Ask before every download" description="Show a confirmation popup each time you press Download Game. Turn this off to start immediately." checked={settings?.askBeforeDownload !== false} disabled={!settings || settingsBusy} onChange={(value) => void saveSettings({ askBeforeDownload: value })} />
+      <SpeedLimitRow title="Direct download speed limit" description="Maximum combined speed for all direct downloads. Measured in MB/s." value={settings?.directSpeedLimit} disabled={!settings || settingsBusy} onChange={(value) => void saveSettings({ directSpeedLimit: value })} />
+      <SpeedLimitRow title="Torrent download speed limit" description="Maximum combined speed for all torrent downloads. Measured in MB/s." value={settings?.torrentSpeedLimit} disabled={!settings || settingsBusy} onChange={(value) => void saveSettings({ torrentSpeedLimit: value })} />
       <div className="settings-folder-row"><div><strong>Download location</strong><p>New games are saved in a separate folder here. Existing downloads stay where they are.</p><code title={settings?.downloadDirectory}>{settings?.downloadDirectory || "Loading folder…"}</code></div><button type="button" className="settings-secondary-button" onClick={() => void chooseFolder()} disabled={!settings || settingsBusy}><FontAwesomeIcon icon={faFolderOpen} />{busy === "folder" ? "Opening…" : "Choose folder"}</button></div>
     </section>
 

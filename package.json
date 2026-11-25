@@ -1,7 +1,7 @@
 {
   "name": "gameonix-app",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": {
     "name": "Mahmoud Pro"
   },
@@ -43,15 +43,31 @@
   "build": {
     "appId": "com.gameonix.desktop",
     "productName": "GameOnix",
-    "directories": { "output": "release" },
-    "files": ["electron/**/*", "dist/**/*", "build/gameonix.ico", "package.json"],
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**/*",
+      "dist/**/*",
+      "build/gameonix.ico",
+      "package.json"
+    ],
     "afterPack": "electron/after-pack.cjs",
     "extraResources": [
-      { "from": "build/gameonix.ico", "to": "gameonix.ico" },
-      { "from": "build/gameonix-icon.png", "to": "gameonix-icon.png" }
+      {
+        "from": "build/gameonix.ico",
+        "to": "gameonix.ico"
+      },
+      {
+        "from": "build/gameonix-icon.png",
+        "to": "gameonix-icon.png"
+      }
     ],
     "asar": true,
     "npmRebuild": false,
-    "win": { "icon": "build/gameonix.ico", "target": "dir" }
+    "win": {
+      "icon": "build/gameonix.ico",
+      "target": "dir"
+    }
   }
 }
