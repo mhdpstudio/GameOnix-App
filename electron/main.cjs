@@ -54,6 +54,8 @@ const speedSamples = new Map()
 let torrentClient
 let downloadsPersistQueue = Promise.resolve()
 let torrentRetryTimer
+const temporarilyDisabledTrackers = new Map()
+let trackerQuarantineLoaded = false
 let downloadDirectory
 let downloadTimer
 let settingsPath
@@ -1075,9 +1077,72 @@ function parseTrackerList(value, limit = 50) {
   return [...udpTrackers.slice(0, udpLimit), ...webTrackers.slice(0, limit - udpLimit), ...udpTrackers.slice(udpLimit)].slice(0, limit)
 }
 
+function normalizeTrackerUrl(value) {
+  try { return new URL(String(value)).toString().replace(/\/$/, '').toLowerCase() } catch { return String(value || '').trim().replace(/\/$/, '').toLowerCase() }
+}
+
+function getAvailableTrackers(trackers) {
+  const now = Date.now()
+  for (const [url, expiresAt] of temporarilyDisabledTrackers) {
+    if (expiresAt <= now) temporarilyDisabledTrackers.delete(url)
+  }
+  return trackers.filter((url) => !temporarilyDisabledTrackers.has(normalizeTrackerUrl(url)))
+}
+
+async function loadTrackerQuarantine() {
+  if (trackerQuarantineLoaded) return
+  trackerQuarantineLoaded = true
+  const cachePath = path.join(app.getPath('userData'), 'failed-trackers-cache.json')
+  try {
+    const cache = JSON.parse(await fs.readFile(cachePath, 'utf8'))
+    for (const entry of Array.isArray(cache.trackers) ? cache.trackers : []) {
+      const url = normalizeTrackerUrl(entry.url)
+      const expiresAt = Number(entry.expiresAt) || 0
+      if (url && expiresAt > Date.now()) temporarilyDisabledTrackers.set(url, expiresAt)
+    }
+  } catch {}
+}
+
+function quarantineTracker(url) {
+  const normalizedUrl = normalizeTrackerUrl(url)
+  if (!normalizedUrl) return
+  temporarilyDisabledTrackers.set(normalizedUrl, Date.now() + 60 * 60 * 1000)
+  if (torrentClient?.tracker && Array.isArray(torrentClient.tracker.announce)) {
+    torrentClient.tracker.announce = torrentClient.tracker.announce.filter((tracker) => normalizeTrackerUrl(tracker) !== normalizedUrl)
+  }
+  for (const torrent of torrentClient?.torrents || []) removeTorrentTracker(torrent, normalizedUrl)
+  void (async () => {
+    const cachePath = path.join(app.getPath('userData'), 'failed-trackers-cache.json')
+    const temporaryPath = `${cachePath}.tmp`
+    const trackers = [...temporarilyDisabledTrackers].map(([trackerUrl, expiresAt]) => ({ url: trackerUrl, expiresAt }))
+    await fs.writeFile(temporaryPath, JSON.stringify({ trackers }, null, 2), 'utf8')
+    await fs.rename(temporaryPath, cachePath)
+  })().catch((error) => console.warn('Could not save temporary tracker exclusions:', error.message))
+}
+
+function removeTorrentTracker(torrent, url) {
+  const trackerClient = torrent.discovery?.tracker
+  if (!Array.isArray(trackerClient?._trackers)) return false
+  const normalizedUrl = normalizeTrackerUrl(url)
+  const failed = trackerClient._trackers.filter((tracker) => normalizeTrackerUrl(tracker.announceUrl) === normalizedUrl)
+  if (!failed.length) return false
+  trackerClient._trackers = trackerClient._trackers.filter((tracker) => normalizeTrackerUrl(tracker.announceUrl) !== normalizedUrl)
+  for (const tracker of failed) {
+    try { tracker.destroy(() => {}) } catch {}
+  }
+  return true
+}
+
+function getTimedOutTrackerUrl(error) {
+  const message = String(error?.message || error || '')
+  if (!/tracker.*(?:timed out|timeout|failed|error)|(?:timed out|timeout).*tracker/i.test(message)) return ''
+  return message.match(/((?:udp|https?):\/\/[^\s)]+)/i)?.[1] || ''
+}
+
 async function loadSupplementalTrackers() {
   if (supplementalTrackersPromise) return supplementalTrackersPromise
   supplementalTrackersPromise = (async () => {
+    await loadTrackerQuarantine()
     const cachePath = path.join(app.getPath('userData'), 'public-trackers-cache.json')
     let cachedTrackers = []
     let cachedAt = 0
@@ -1088,7 +1153,7 @@ async function loadSupplementalTrackers() {
       cachedAt = Number(cache.savedAt) || 0
       cacheVersion = Number(cache.formatVersion) || 0
     } catch {}
-    if (cacheVersion >= 2 && cachedTrackers.length && Date.now() - cachedAt < 24 * 60 * 60 * 1000) return cachedTrackers
+    if (cacheVersion >= 2 && cachedTrackers.length && Date.now() - cachedAt < 24 * 60 * 60 * 1000) return getAvailableTrackers(cachedTrackers)
 
     try {
       const response = await net.fetch(TRACKER_LIST_URL, { signal: AbortSignal.timeout(8000) })
@@ -1096,10 +1161,10 @@ async function loadSupplementalTrackers() {
       const trackers = parseTrackerList(`${await response.text()}\n${FALLBACK_TRACKERS.join('\n')}`, 50)
       if (!trackers.length) throw new Error('Tracker list was empty.')
       await fs.writeFile(cachePath, JSON.stringify({ formatVersion: 2, savedAt: Date.now(), trackers }), 'utf8')
-      return trackers
+      return getAvailableTrackers(trackers)
     } catch (error) {
       console.warn('Could not refresh public tracker list; using cached/default trackers:', error.message)
-      return parseTrackerList([...cachedTrackers, ...FALLBACK_TRACKERS].join('\n'), 50)
+      return getAvailableTrackers(parseTrackerList([...cachedTrackers, ...FALLBACK_TRACKERS].join('\n'), 50))
     }
   })().finally(() => { supplementalTrackersPromise = null })
   return supplementalTrackersPromise
@@ -1291,8 +1356,20 @@ async function startTorrent(item, { paused = false } = {}) {
     item.retryable = false
   })
   torrent.on('warning', (error) => {
-    item.discoveryWarning = String(error?.message || error || 'Peer discovery warning').slice(0, 220)
-    const failedPiece = String(error?.message || '').match(/piece\s+(\d+)\s+failed verification/i)
+    const message = String(error?.message || error || 'Peer discovery warning')
+    const timedOutTrackerUrl = getTimedOutTrackerUrl(error)
+    if (timedOutTrackerUrl) {
+      quarantineTracker(timedOutTrackerUrl)
+      removeTorrentTracker(torrent, timedOutTrackerUrl)
+      item.trackerCount = torrent.discovery?.tracker?._trackers?.length || 0
+      item.discoveryWarning = ''
+      item.updatedAt = new Date().toISOString()
+      void saveAndPublish()
+      console.warn(`Temporarily skipped tracker for ${item.slug}:`, timedOutTrackerUrl)
+      return
+    }
+    item.discoveryWarning = message.slice(0, 220)
+    const failedPiece = message.match(/piece\s+(\d+)\s+failed verification/i)
     if (failedPiece) void item.partialRecovery?.discardPiece(Number(failedPiece[1]))
     console.warn(`Torrent discovery warning (${item.slug}):`, error)
   })
@@ -1300,6 +1377,7 @@ async function startTorrent(item, { paused = false } = {}) {
     item.total = Number(torrent.length) || item.total
     item.title = item.title || torrent.name || item.slug
     item.privateTorrent = Boolean(torrent.private)
+    if (Array.isArray(torrent.announce)) torrent.announce = getAvailableTrackers(torrent.announce)
     item.trackerCount = Array.isArray(torrent.announce) ? torrent.announce.length : 0
     item.files = (torrent.files || []).map((file) => ({ name: file.name, length: Number(file.length) || 0 }))
     if (!Array.isArray(item.selectedFiles)) item.selectedFiles = pendingFileSelection ? [] : torrent.files.map((_, index) => index)
