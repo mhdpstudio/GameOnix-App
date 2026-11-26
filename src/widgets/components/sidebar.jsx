@@ -449,8 +449,6 @@ function Sidebar({ collapsed, onToggle }) {
         </nav>
 
         <div className="sidebar-bottom">
-          <div className="sidebar-divider" />
-
           {window.gameonixDesktop && (
             <NavLink
               to="/downloads"
@@ -472,6 +470,8 @@ function Sidebar({ collapsed, onToggle }) {
               {!collapsed && <span className="sidebar-link-indicator"><FontAwesomeIcon icon={faChevronRight} /></span>}
             </NavLink>
           )}
+
+          <div className="sidebar-divider" />
 
           {authLoading ? (
             <div className="sidebar-account-link" aria-live="polite">
