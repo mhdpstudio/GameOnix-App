@@ -694,7 +694,9 @@
   }
 
   .sidebar-bottom-download-link .sidebar-link-label,
-  .sidebar-bottom-download-link .sidebar-link-indicator {
+  .sidebar-bottom-download-link .sidebar-link-indicator,
+  .sidebar-bottom-settings-link .sidebar-link-label,
+  .sidebar-bottom-settings-link .sidebar-link-indicator {
     display: none;
   }
 
