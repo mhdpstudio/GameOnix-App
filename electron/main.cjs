@@ -838,7 +838,10 @@ async function ensureTorrentClient() {
   if (torrentClient) return torrentClient
   const { default: WebTorrent } = await import('webtorrent')
   const announce = await loadSupplementalTrackers()
-  torrentClient = new WebTorrent({ maxConns: 160, tracker: { announce }, natUpnp: true, natPmp: true, utp: true, utPex: true, lsd: true })
+  // utp-native allocates a 128 KiB buffer per connection. A high peer cap can
+  // exhaust memory on Windows and crash Electron's main process (losing the
+  // in-memory transfer state). TCP peers, DHT, and trackers remain enabled.
+  torrentClient = new WebTorrent({ maxConns: 48, tracker: { announce }, natUpnp: true, natPmp: true, utp: false, utPex: true, lsd: true })
   applyTorrentSpeedLimit()
   torrentClient.on('error', (error) => console.error('Torrent client error:', error))
   return torrentClient
