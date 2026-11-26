@@ -693,6 +693,15 @@
     display: block;
   }
 
+  .sidebar-bottom-download-link .sidebar-link-label,
+  .sidebar-bottom-download-link .sidebar-link-indicator {
+    display: none;
+  }
+
+  .sidebar-bottom-download-link .sidebar-active-download-badge {
+    display: block;
+  }
+
   .sidebar-link,
   .sidebar-account-link {
     justify-content: center;

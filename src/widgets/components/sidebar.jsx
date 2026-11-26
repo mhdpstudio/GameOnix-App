@@ -43,7 +43,6 @@ const navigation = [
       { label: "Home", to: "/", icon: faHouse, end: true },
       { label: "Discover", to: "/discover", icon: faCompass },
       { label: "My Library", to: "/library", icon: faBookOpen },
-      { label: "Downloads", to: "/downloads", icon: faDownload, desktopOnly: true },
       { label: "Settings", to: "/settings", icon: faGear, desktopOnly: true },
       { label: "Request a Game", to: "/request-game", icon: faHandPointUp },
       { label: "Reviews", to: "/reviews", icon: faStar },
@@ -451,6 +450,28 @@ function Sidebar({ collapsed, onToggle }) {
 
         <div className="sidebar-bottom">
           <div className="sidebar-divider" />
+
+          {window.gameonixDesktop && (
+            <NavLink
+              to="/downloads"
+              title={collapsed ? `Downloads${activeDownloadCount ? ` — ${activeDownloadCount} active` : ""}` : undefined}
+              className={({ isActive }) => `sidebar-link sidebar-bottom-download-link${isActive ? " active" : ""}`}
+            >
+              <FontAwesomeIcon icon={faDownload} className="sidebar-link-icon" />
+              {!collapsed && <span className="sidebar-link-label">Downloads</span>}
+              {!collapsed && activeDownloadCount > 0 && (
+                <span className="sidebar-active-download-badge" aria-label={`${activeDownloadCount} active downloads`}>
+                  {activeDownloadCount > 99 ? "+99" : activeDownloadCount}
+                </span>
+              )}
+              {collapsed && activeDownloadCount > 0 && (
+                <span className="sidebar-active-download-badge" aria-label={`${activeDownloadCount} active downloads`}>
+                  {activeDownloadCount > 99 ? "+99" : activeDownloadCount}
+                </span>
+              )}
+              {!collapsed && <span className="sidebar-link-indicator"><FontAwesomeIcon icon={faChevronRight} /></span>}
+            </NavLink>
+          )}
 
           {authLoading ? (
             <div className="sidebar-account-link" aria-live="polite">
