@@ -18,7 +18,7 @@ npm install
 npm run dist
 ```
 
-The unpacked app is written to `release/win-unpacked/`. Run `GameOnix.exe` from that folder. No installer is required. The app opens maximized, uses its own title bar and taskbar icon, and offers Settings for close-to-tray, Windows startup, download confirmations, and the download folder. Closing to the tray keeps torrent transfers running. The Downloads page can pause, resume, remove, and open completed downloads; unfinished transfers resume from their existing files after a full restart.
+The unpacked app is written to `release/win-unpacked/`. Run `GameOnix.exe` from that folder. No installer is required. The app opens maximized, uses its own title bar and taskbar icon, and offers Settings for close-to-tray, Windows startup, download confirmations, and the download folder. Closing to the tray keeps torrent transfers running. Torrent data is written directly to the selected download folder. On restart, the app loads its cached torrent metadata and verifies existing file pieces before resuming, so interrupted downloads continue after the app or computer closes and recover missing or damaged pieces. Network failures are retried automatically.
 
 ## GitHub releases and environment
 

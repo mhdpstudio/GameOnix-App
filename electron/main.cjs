@@ -39,6 +39,8 @@ const activeTorrents = new Map()
 const finalizingTorrents = new Set()
 const speedSamples = new Map()
 let torrentClient
+let downloadsPersistQueue = Promise.resolve()
+let torrentRetryTimer
 let downloadDirectory
 let downloadTimer
 let settingsPath
@@ -632,6 +634,7 @@ function publicDownload(item) {
     slug: item.slug,
     title: item.title,
     status: item.status,
+    checkingFiles: Boolean(item.checkingFiles),
     progress: Number(item.progress) || 0,
     downloaded: Number(item.downloaded) || 0,
     total: Number(item.total) || 0,
@@ -650,6 +653,16 @@ function publicDownload(item) {
     selectedFiles: Array.isArray(item.selectedFiles) ? item.selectedFiles : [],
     updatedAt: item.updatedAt || null,
   }
+}
+
+function torrentMetadataPath(item) {
+  return path.join(app.getPath('userData'), 'torrent-metadata', `${item.slug}.torrent`)
+}
+
+function isRetryableTorrentError(error) {
+  const code = String(error?.code || '').toUpperCase()
+  if (['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EAI_AGAIN', 'ENOTFOUND', 'ENETUNREACH', 'EHOSTUNREACH', 'ERR_NETWORK'].includes(code)) return true
+  return /network|fetch|socket|timed out|dns|connection/i.test(String(error?.message || error || ''))
 }
 
 function publicDirectDownload(item) {
@@ -807,10 +820,14 @@ function getSnapshot() {
 
 async function persistDownloads() {
   if (!downloadsPath) return
-  const records = [...downloads.values()].map(({ samples, smoothedSpeed, targetDirectory, lastBitfieldCheckpointAt, ...item }) => item)
-  const temporaryPath = `${downloadsPath}.tmp`
-  await fs.writeFile(temporaryPath, JSON.stringify({ downloadDirectory, settings: appSettings, downloads: records }, null, 2), 'utf8')
-  await fs.rename(temporaryPath, downloadsPath)
+  const write = async () => {
+    const records = [...downloads.values()].map(({ samples, smoothedSpeed, targetDirectory, bitfield, lastBitfieldCheckpointAt, ...item }) => item)
+    const temporaryPath = `${downloadsPath}.tmp`
+    await fs.writeFile(temporaryPath, JSON.stringify({ downloadDirectory, settings: appSettings, downloads: records }, null, 2), 'utf8')
+    await fs.rename(temporaryPath, downloadsPath)
+  }
+  downloadsPersistQueue = downloadsPersistQueue.catch(() => {}).then(write)
+  await downloadsPersistQueue
 }
 
 function publishSnapshot() {
@@ -971,10 +988,6 @@ function startStatsTimer() {
     for (const [id, torrent] of activeTorrents) {
       const item = downloads.get(id)
       if (!item || !torrent || torrent.destroyed || finalizingTorrents.has(id)) continue
-      if (torrent.ready && now - (item.lastBitfieldCheckpointAt || 0) >= 10_000) {
-        item.bitfield = Buffer.from(torrent.bitfield.buffer).toString('base64')
-        item.lastBitfieldCheckpointAt = now
-      }
       const speed = torrent.paused ? 0 : getSmoothedSpeed(torrent, item)
       const selected = Array.isArray(item.selectedFiles) ? item.selectedFiles : []
       const files = selected.map((index) => torrent.files?.[index]).filter(Boolean)
@@ -1012,6 +1025,8 @@ async function startTorrent(item, { paused = false } = {}) {
 
   await fs.mkdir(item.targetDirectory, { recursive: true })
   item.status = 'starting'
+  item.checkingFiles = true
+  item.retryable = false
   item.error = ''
   item.speed = 0
   item.etaSeconds = null
@@ -1019,15 +1034,11 @@ async function startTorrent(item, { paused = false } = {}) {
   item.samples = []
   item.lastSample = null
 
-  let savedBitfield
-  if (typeof item.bitfield === 'string' && item.bitfield.length <= 16_000_000) {
-    try {
-      const bytes = Buffer.from(item.bitfield, 'base64')
-      if (bytes.length && bytes.toString('base64') === item.bitfield) savedBitfield = new Uint8Array(bytes)
-    } catch {}
+  let torrentInput = item.torrentUrl
+  if (item.cachedMetadataUrl === item.torrentUrl && item.infoHash) {
+    try { torrentInput = await fs.readFile(torrentMetadataPath(item)) } catch {}
   }
-
-  const torrent = client.add(item.torrentUrl, {
+  const torrentOptions = {
     path: item.targetDirectory,
     // Keep peer discovery alive while the user chooses files. `deselect: true`
     // prevents payload requests until the chosen files are selected.
@@ -1037,8 +1048,15 @@ async function startTorrent(item, { paused = false } = {}) {
     noPeersIntervalTime: 15,
     destroyStoreOnDestroy: false,
     deselect: true,
-    ...(savedBitfield ? { bitfield: savedBitfield } : {}),
-  })
+    // Do not trust a saved in-memory bitfield after a crash or power loss.
+    // WebTorrent hashes every existing piece on disk before marking it done.
+  }
+  let torrent = client.add(torrentInput, torrentOptions)
+  if (Buffer.isBuffer(torrentInput) && item.infoHash && torrent.infoHash && torrent.infoHash !== item.infoHash) {
+    await new Promise((resolve) => torrent.destroy({ destroyStore: false }, resolve))
+    item.cachedMetadataUrl = ''
+    torrent = client.add(item.torrentUrl, torrentOptions)
+  }
   activeTorrents.set(item.id, torrent)
   let resolveTorrentReady
   let rejectTorrentReady
@@ -1067,6 +1085,7 @@ async function startTorrent(item, { paused = false } = {}) {
   })
   torrent.on('wire', () => {
     item.lastPeerConnectedAt = new Date().toISOString()
+    item.retryable = false
   })
   torrent.on('warning', (error) => {
     item.discoveryWarning = String(error?.message || error || 'Peer discovery warning').slice(0, 220)
@@ -1079,8 +1098,19 @@ async function startTorrent(item, { paused = false } = {}) {
     item.trackerCount = Array.isArray(torrent.announce) ? torrent.announce.length : 0
     item.files = (torrent.files || []).map((file) => ({ name: file.name, length: Number(file.length) || 0 }))
     if (!Array.isArray(item.selectedFiles)) item.selectedFiles = pendingFileSelection ? [] : torrent.files.map((_, index) => index)
+    item.infoHash = torrent.infoHash
+    void (async () => {
+      const metadataPath = torrentMetadataPath(item)
+      const temporaryPath = `${metadataPath}.tmp`
+      await fs.mkdir(path.dirname(metadataPath), { recursive: true })
+      await fs.writeFile(temporaryPath, Buffer.from(torrent.torrentFile))
+      await fs.rename(temporaryPath, metadataPath)
+      item.cachedMetadataUrl = item.torrentUrl
+      await saveAndPublish()
+    })().catch((error) => console.error(`Could not cache torrent metadata (${item.slug}):`, error))
   })
   torrent.on('ready', () => {
+    item.checkingFiles = false
     if (pendingFileSelection) torrent.deselect(0, Math.max(0, torrent.pieces.length - 1))
     else if (torrent.paused) pauseTorrentRequests(torrent)
     else {
@@ -1098,9 +1128,11 @@ async function startTorrent(item, { paused = false } = {}) {
     finalizeCompletedTorrent(item, torrent)
   })
   torrent.on('error', (error) => {
+    item.checkingFiles = false
     rejectTorrentReady(error)
     item.status = 'error'
     item.error = error?.message || 'The torrent could not be downloaded.'
+    item.retryable = isRetryableTorrentError(error)
     item.speed = 0
     item.etaSeconds = null
     void saveAndPublish()
@@ -1316,14 +1348,31 @@ function applyStartupSetting() {
 
 async function restoreDownloads() {
   for (const item of downloads.values()) {
-    if (['downloading', 'starting', 'selecting'].includes(item.status)) {
+    if (['downloading', 'starting', 'selecting'].includes(item.status) || (item.status === 'error' && item.retryable)) {
       const wasSelecting = item.status === 'selecting'
       void startTorrent(item, { paused: wasSelecting }).catch((error) => {
+        item.checkingFiles = false
         item.status = 'error'
         item.error = error.message
+        item.retryable = isRetryableTorrentError(error)
         void saveAndPublish()
       })
     }
+  }
+  if (!torrentRetryTimer) {
+    torrentRetryTimer = setInterval(() => {
+      for (const item of downloads.values()) {
+        if (item.status !== 'error' || !item.retryable) continue
+        void startTorrent(item).catch((error) => {
+          item.checkingFiles = false
+          item.status = 'error'
+          item.error = error.message || 'The torrent could not be restarted.'
+          item.retryable = isRetryableTorrentError(error)
+          void saveAndPublish()
+        })
+      }
+    }, 30_000)
+    torrentRetryTimer.unref?.()
   }
 }
 
@@ -1693,8 +1742,10 @@ function registerDownloadIpc() {
       syncTray()
       return { id: slug, downloads: getSnapshot() }
     } catch (error) {
+      item.checkingFiles = false
       item.status = 'error'
       item.error = error.message || 'Could not start this torrent.'
+      item.retryable = isRetryableTorrentError(error)
       await saveAndPublish()
       throw error
     }
@@ -1885,7 +1936,6 @@ app.on('before-quit', (event) => {
       item.total = Number(torrent.length) || item.total
       item.progress = Number(torrent.progress) || item.progress
       item.status = torrent.done ? 'completed' : wasPaused ? 'paused' : 'downloading'
-      if (torrent.bitfield?.buffer) item.bitfield = Buffer.from(torrent.bitfield.buffer).toString('base64')
       if (!wasPaused && !torrent.done) pauseTorrentRequests(torrent)
     }
     await persistDownloads()

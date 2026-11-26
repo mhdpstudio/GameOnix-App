@@ -28,7 +28,8 @@ function formatDuration(seconds) {
   return `${remaining}s remaining`;
 }
 
-function statusLabel(status) {
+function statusLabel(status, checkingFiles = false) {
+  if (checkingFiles) return "Checking files";
   return ({ selecting: "Choose files", starting: "Connecting", downloading: "Downloading", "waiting-for-download": "Ready to start", finalizing: "Finishing files", paused: "Paused", completed: "Complete", cancelled: "Cancelled", error: "Needs attention" })[status] || "Waiting";
 }
 
@@ -111,7 +112,7 @@ export default function Downloads() {
   if (!desktop) return <main className="downloads-page"><section className="downloads-empty"><FontAwesomeIcon icon={faDownload} /><h1>Downloads are available in GameOnix Desktop</h1><p>Install the GameOnix app to download games and track their progress here.</p><Link to="/games">Browse games</Link></section></main>;
 
   return <main className="downloads-page">
-    <header className="downloads-heading"><div><span className="downloads-eyebrow">GAMEONIX DESKTOP</span><h1>Downloads</h1><p>Track game downloads and find completed files in one place.</p></div><Link to="/settings" className="downloads-folder-button"><FontAwesomeIcon icon={faFolderOpen} /> Manage download settings</Link></header>
+    <header className="downloads-heading"><div><span className="downloads-eyebrow">GAMEONIX DESKTOP</span><h1>Downloads</h1><p>Files are saved to your device and checked before an interrupted download resumes.</p></div><Link to="/settings" className="downloads-folder-button"><FontAwesomeIcon icon={faFolderOpen} /> Manage download settings</Link></header>
     <section className="downloads-summary"><article><span>Active downloads</span><strong>{activeCount}</strong></article><article><span>Completed</span><strong>{completedCount}</strong></article><article className="downloads-location"><span>Save location</span><strong title={folder}>{folder || "Loading..."}</strong></article></section>
     {error && <div className="downloads-error" role="alert">{error}</div>}
     {!items.length && !directItems.length ? <section className="downloads-empty"><span className="downloads-empty-icon"><FontAwesomeIcon icon={faArrowDown} /></span><h2>Your downloads will show here</h2><p>Start a game download and follow its progress here.</p><Link to="/games">Browse games</Link></section> : <section className="downloads-list" aria-label="Download list">
@@ -142,7 +143,7 @@ export default function Downloads() {
       const isBusy = busyId === item.id;
       const selectedFiles = fileChoices[item.id] ?? item.selectedFiles ?? [];
       return <article className={`download-card is-${item.status}`} key={item.id}>
-        <div className="download-card-top"><span className={`download-status status-${item.status}`}><i />{statusLabel(item.status)}</span><strong>{percent.toFixed(1)}%</strong></div>
+        <div className="download-card-top"><span className={`download-status status-${item.status}`}><i />{statusLabel(item.status, item.checkingFiles)}</span><strong>{percent.toFixed(1)}%</strong></div>
         <h2>{item.title}</h2>
         {item.status === "selecting" && <section className="download-file-picker" aria-label={`Choose files for ${item.title}`}><strong>Choose files to download</strong>{item.files?.length ? item.files.map((file, index) => <label key={`${file.name}-${index}`}><input type="checkbox" checked={selectedFiles.includes(index)} onChange={(event) => setFileChoices((current) => { const next = new Set(current[item.id] ?? item.selectedFiles ?? []); event.target.checked ? next.add(index) : next.delete(index); return { ...current, [item.id]: [...next] }; })} /><span>{file.name}</span><small>{formatBytes(file.length)}</small></label>) : <p>Reading torrent file list…</p>}<button type="button" className="is-primary" disabled={isBusy || !item.files?.length || !selectedFiles.length} onClick={() => void runAction(item.id, () => desktop.downloads.begin(item.id, selectedFiles))}><FontAwesomeIcon icon={faDownload} /> Download selected files</button></section>}
         {item.error && <p className="download-card-error">{item.error}</p>}
