@@ -665,6 +665,187 @@ function isRetryableTorrentError(error) {
   return /network|fetch|socket|timed out|dns|connection/i.test(String(error?.message || error || ''))
 }
 
+function createPartialPieceRecovery(torrent, item) {
+  const directory = path.join(path.dirname(item.targetDirectory), '.gameonix-partial', torrent.infoHash)
+  const journalPath = path.join(directory, 'blocks.bin')
+  const knownPieces = new Set()
+  const tombstonesQueued = new Set()
+  let pendingRecords = []
+  let writeQueue = Promise.resolve()
+  let disposed = false
+
+  const makeRecord = (type, pieceIndex, chunkIndex = 0, data = Buffer.alloc(0)) => {
+    const header = Buffer.alloc(11)
+    header[0] = type
+    header.writeUInt32LE(pieceIndex, 1)
+    header.writeUInt32LE(chunkIndex, 5)
+    header.writeUInt16LE(data.length, 9)
+    return data.length ? Buffer.concat([header, data]) : header
+  }
+
+  const parseJournal = async () => {
+    const latest = new Map()
+    let contents
+    try { contents = await fs.readFile(journalPath) } catch (error) {
+      if (error.code === 'ENOENT') return latest
+      throw error
+    }
+    let offset = 0
+    while (offset + 11 <= contents.length) {
+      const type = contents[offset]
+      const pieceIndex = contents.readUInt32LE(offset + 1)
+      const chunkIndex = contents.readUInt32LE(offset + 5)
+      const length = contents.readUInt16LE(offset + 9)
+      const end = offset + 11 + length
+      if (end > contents.length || (type !== 0 && type !== 1) || (type === 0 && length !== 0) || (type === 1 && !length)) break
+      if (type === 0) latest.delete(pieceIndex)
+      else {
+        let blocks = latest.get(pieceIndex)
+        if (!blocks) latest.set(pieceIndex, blocks = new Map())
+        blocks.set(chunkIndex, Buffer.from(contents.subarray(offset + 11, end)))
+      }
+      offset = end
+    }
+    return latest
+  }
+
+  const writePending = async () => {
+    if (!pendingRecords.length) return writeQueue
+    const batch = pendingRecords
+    pendingRecords = []
+    writeQueue = writeQueue.catch(() => {}).then(async () => {
+      await fs.mkdir(directory, { recursive: true })
+      const handle = await fs.open(journalPath, 'a')
+      try {
+        await handle.writeFile(Buffer.concat(batch))
+        await handle.sync()
+      } finally { await handle.close() }
+    })
+    writeQueue = writeQueue.catch((error) => {
+      pendingRecords.unshift(...batch)
+      console.error(`Could not persist partial torrent pieces (${item.slug}):`, error)
+    })
+    await writeQueue
+  }
+
+  const appendBlock = (pieceIndex, chunkIndex, data) => {
+    knownPieces.add(pieceIndex)
+    pendingRecords.push(makeRecord(1, pieceIndex, chunkIndex, Buffer.from(data)))
+  }
+
+  const restoreAndHook = async () => {
+    await fs.mkdir(directory, { recursive: true })
+    const savedPieces = await parseJournal()
+    for (const [pieceIndex, blocks] of savedPieces) {
+      const piece = torrent.pieces[pieceIndex]
+      if (!piece) continue
+      if (torrent.bitfield.get(pieceIndex)) {
+        knownPieces.add(pieceIndex)
+        continue
+      }
+      knownPieces.add(pieceIndex)
+      if (blocks.size === piece._chunks) blocks.delete(piece._chunks - 1)
+      const restoredChunks = new Set()
+      for (const [chunkIndex, data] of blocks) {
+        if (chunkIndex < piece._chunks && data.length === piece.chunkLength(chunkIndex)) {
+          piece.set(chunkIndex, data, null)
+          restoredChunks.add(chunkIndex)
+        }
+      }
+      piece._reservations = piece._chunks
+      piece._cancellations = []
+      for (let chunkIndex = 0; chunkIndex < piece._chunks; chunkIndex += 1) {
+        if (!restoredChunks.has(chunkIndex)) piece._cancellations.push(chunkIndex)
+      }
+    }
+    for (const [pieceIndex, piece] of torrent.pieces.entries()) {
+      if (!piece) continue
+      const set = piece.set
+      piece.set = function (reservation, data, source) {
+        const count = Math.ceil(data.length / 16_384)
+        const hadChunks = Array.from({ length: count }, (_, offset) => Boolean(this._buffer?.[reservation + offset]))
+        const result = set.call(this, reservation, data, source)
+        for (let offset = 0; offset < count; offset += 1) {
+          const chunkIndex = reservation + offset
+          if (hadChunks[offset] || !this._buffer?.[chunkIndex]) continue
+          const chunk = this._buffer[chunkIndex]
+          if (chunk.byteLength) appendBlock(pieceIndex, chunkIndex, chunk)
+        }
+        return result
+      }
+    }
+    await cleanupVerified(torrent.bitfield)
+  }
+
+  const cleanupVerified = async (bitfield) => {
+    for (const pieceIndex of knownPieces) {
+      if (bitfield.get(pieceIndex) && !tombstonesQueued.has(pieceIndex)) {
+        tombstonesQueued.add(pieceIndex)
+        pendingRecords.push(makeRecord(0, pieceIndex))
+      }
+    }
+    await writePending()
+    for (const pieceIndex of tombstonesQueued) knownPieces.delete(pieceIndex)
+    tombstonesQueued.clear()
+
+    let stat
+    try { stat = await fs.stat(journalPath) } catch { return }
+    if (stat.size < 4 * 1024 * 1024) return
+    writeQueue = writeQueue.then(async () => {
+      const latest = await parseJournal()
+      const compacted = []
+      const remaining = new Set()
+      for (const [pieceIndex, blocks] of latest) {
+        if (bitfield.get(pieceIndex)) continue
+        remaining.add(pieceIndex)
+        for (const [chunkIndex, data] of blocks) compacted.push(makeRecord(1, pieceIndex, chunkIndex, data))
+      }
+      const temporaryPath = `${journalPath}.tmp`
+      const handle = await fs.open(temporaryPath, 'w')
+      try {
+        if (compacted.length) await handle.writeFile(Buffer.concat(compacted))
+        await handle.sync()
+      } finally { await handle.close() }
+      await fs.rename(temporaryPath, journalPath)
+      for (const pieceIndex of knownPieces) {
+        if (bitfield.get(pieceIndex)) knownPieces.delete(pieceIndex)
+      }
+      for (const pieceIndex of remaining) knownPieces.add(pieceIndex)
+    }).catch((error) => console.error(`Could not compact partial torrent pieces (${item.slug}):`, error))
+    await writeQueue
+  }
+
+  const discardPiece = async (pieceIndex) => {
+    if (!knownPieces.has(pieceIndex) || tombstonesQueued.has(pieceIndex)) return
+    tombstonesQueued.add(pieceIndex)
+    pendingRecords.push(makeRecord(0, pieceIndex))
+    await writePending()
+    knownPieces.delete(pieceIndex)
+    tombstonesQueued.delete(pieceIndex)
+  }
+
+  const timer = setInterval(() => { void writePending() }, 500)
+  timer.unref?.()
+  return {
+    restoreAndHook,
+    cleanupVerified,
+    discardPiece,
+    flush: writePending,
+    async remove() {
+      disposed = true
+      clearInterval(timer)
+      await writePending()
+      await fs.rm(directory, { recursive: true, force: true })
+    },
+    dispose() {
+      if (disposed) return
+      disposed = true
+      clearInterval(timer)
+      void writePending()
+    },
+  }
+}
+
 function publicDirectDownload(item) {
   return {
     id: item.id,
@@ -821,7 +1002,7 @@ function getSnapshot() {
 async function persistDownloads() {
   if (!downloadsPath) return
   const write = async () => {
-    const records = [...downloads.values()].map(({ samples, smoothedSpeed, targetDirectory, bitfield, lastBitfieldCheckpointAt, ...item }) => item)
+    const records = [...downloads.values()].map(({ samples, smoothedSpeed, targetDirectory, bitfield, lastBitfieldCheckpointAt, partialRecovery, partialCleanupAt, checkingFiles, ...item }) => item)
     const temporaryPath = `${downloadsPath}.tmp`
     await fs.writeFile(temporaryPath, JSON.stringify({ downloadDirectory, settings: appSettings, downloads: records }, null, 2), 'utf8')
     await fs.rename(temporaryPath, downloadsPath)
@@ -950,8 +1131,6 @@ function finalizeCompletedTorrent(item, torrent) {
   item.speed = 0
   item.etaSeconds = 0
   item.updatedAt = new Date().toISOString()
-  if (torrent.bitfield?.buffer) item.bitfield = Buffer.from(torrent.bitfield.buffer).toString('base64')
-
   syncTray()
   void saveAndPublish()
 
@@ -976,6 +1155,7 @@ function finalizeCompletedTorrent(item, torrent) {
       item.error = 'The download is complete, but GameOnix could not release its file handles.'
       console.error(`Could not close completed torrent files (${item.slug}):`, error)
     }
+    void item.partialRecovery?.remove()
     void saveAndPublish()
     syncTray()
   })
@@ -988,6 +1168,10 @@ function startStatsTimer() {
     for (const [id, torrent] of activeTorrents) {
       const item = downloads.get(id)
       if (!item || !torrent || torrent.destroyed || finalizingTorrents.has(id)) continue
+      if (item.partialRecovery && now - (item.partialCleanupAt || 0) >= 5000) {
+        item.partialCleanupAt = now
+        void item.partialRecovery.cleanupVerified(torrent.bitfield)
+      }
       const speed = torrent.paused ? 0 : getSmoothedSpeed(torrent, item)
       const selected = Array.isArray(item.selectedFiles) ? item.selectedFiles : []
       const files = selected.map((index) => torrent.files?.[index]).filter(Boolean)
@@ -1089,6 +1273,8 @@ async function startTorrent(item, { paused = false } = {}) {
   })
   torrent.on('warning', (error) => {
     item.discoveryWarning = String(error?.message || error || 'Peer discovery warning').slice(0, 220)
+    const failedPiece = String(error?.message || '').match(/piece\s+(\d+)\s+failed verification/i)
+    if (failedPiece) void item.partialRecovery?.discardPiece(Number(failedPiece[1]))
     console.warn(`Torrent discovery warning (${item.slug}):`, error)
   })
   torrent.on('metadata', () => {
@@ -1110,20 +1296,29 @@ async function startTorrent(item, { paused = false } = {}) {
     })().catch((error) => console.error(`Could not cache torrent metadata (${item.slug}):`, error))
   })
   torrent.on('ready', () => {
-    item.checkingFiles = false
-    if (pendingFileSelection) torrent.deselect(0, Math.max(0, torrent.pieces.length - 1))
-    else if (torrent.paused) pauseTorrentRequests(torrent)
-    else {
-      torrent.deselect(0, Math.max(0, torrent.pieces.length - 1))
-      for (const index of item.selectedFiles || []) torrent.files[index]?.select()
-    }
-    item.status = pendingFileSelection ? 'selecting' : torrent.paused ? 'paused' : 'downloading'
-    item.total = Number(torrent.length) || item.total
-    item.title = item.title || torrent.name || item.slug
-    item.infoHash = torrent.infoHash
-    resolveTorrentReady()
-    void saveAndPublish()
+    void (async () => {
+      item.partialRecovery = createPartialPieceRecovery(torrent, item)
+      try { await item.partialRecovery.restoreAndHook() } catch (error) {
+        console.error(`Could not restore partial torrent pieces (${item.slug}):`, error)
+      }
+      if (torrent.destroyed) return
+      item.checkingFiles = false
+      if (pendingFileSelection) torrent.deselect(0, Math.max(0, torrent.pieces.length - 1))
+      else if (torrent.paused) pauseTorrentRequests(torrent)
+      else {
+        torrent.deselect(0, Math.max(0, torrent.pieces.length - 1))
+        for (const index of item.selectedFiles || []) torrent.files[index]?.select()
+      }
+      item.status = pendingFileSelection ? 'selecting' : torrent.paused ? 'paused' : 'downloading'
+      item.total = Number(torrent.length) || item.total
+      item.title = item.title || torrent.name || item.slug
+      item.infoHash = torrent.infoHash
+      resolveTorrentReady()
+      void saveAndPublish()
+    })()
   })
+  torrent.on('verified', (pieceIndex) => { void item.partialRecovery?.discardPiece(pieceIndex) })
+  torrent.on('close', () => item.partialRecovery?.dispose())
   torrent.on('done', () => {
     finalizeCompletedTorrent(item, torrent)
   })
@@ -1348,7 +1543,7 @@ function applyStartupSetting() {
 
 async function restoreDownloads() {
   for (const item of downloads.values()) {
-    if (['downloading', 'starting', 'selecting'].includes(item.status) || (item.status === 'error' && item.retryable)) {
+    if (['downloading', 'starting', 'selecting', 'paused'].includes(item.status) || (item.status === 'error' && item.retryable)) {
       const wasSelecting = item.status === 'selecting'
       void startTorrent(item, { paused: wasSelecting }).catch((error) => {
         item.checkingFiles = false
@@ -1834,6 +2029,7 @@ function registerDownloadIpc() {
     if (!item) return getSnapshot()
     const torrent = activeTorrents.get(safeId)
     if (torrent && !torrent.destroyed) await new Promise((resolve) => torrent.destroy({ destroyStore: false }, resolve))
+    await item.partialRecovery?.remove()
     activeTorrents.delete(safeId)
     if (deleteFiles) {
       const expectedDirectory = path.resolve(path.join(item.downloadDirectory || downloadDirectory, safeSlug(item.slug)))
@@ -1938,6 +2134,7 @@ app.on('before-quit', (event) => {
       item.status = torrent.done ? 'completed' : wasPaused ? 'paused' : 'downloading'
       if (!wasPaused && !torrent.done) pauseTorrentRequests(torrent)
     }
+    await Promise.all([...downloads.values()].map((item) => item.partialRecovery?.flush()))
     await persistDownloads()
   }
   void checkpointAndPause().catch((error) => console.error('Could not save download checkpoints before closing:', error)).finally(() => {
