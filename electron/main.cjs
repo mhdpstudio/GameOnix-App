@@ -15,7 +15,7 @@ const DEV_URL = 'http://localhost:5173'
 const APP_USER_MODEL_ID = 'com.gameonix.desktop'
 const TOAST_ACTIVATOR_CLSID = '{71C8C61D-96A7-40E2-AB8C-64CB4A4B6F13}'
 const TRUSTED_TORRENT_PREFIX = 'https://raw.githubusercontent.com/mhdpstudio/GameOnix-Data-Content/main/downloads/'
-const TRACKER_LIST_URL = 'https://raw.githubusercontent.com/ngosang/trackerslist/master/trackers_best.txt'
+const TRACKER_LIST_URL = 'https://raw.githubusercontent.com/ngosang/trackerslist/master/trackers_all.txt'
 const FALLBACK_TRACKERS = [
   'udp://tracker.opentrackr.org:1337/announce',
   'udp://open.stealth.si:80/announce',
@@ -23,8 +23,21 @@ const FALLBACK_TRACKERS = [
   'udp://open.demonii.com:1337/announce',
   'udp://open.tracker.cl:1337/announce',
   'udp://exodus.desync.com:6969/announce',
+  'udp://tracker.qu.ax:6969/announce',
+  'udp://tracker-udp.gbitt.info:80/announce',
+  'udp://tracker.bittor.pw:1337/announce',
+  'udp://tracker.theoks.net:6969/announce',
+  'udp://tracker2.dler.org:80/announce',
+  'udp://explodie.org:6969/announce',
+  'udp://tracker.tryhackx.org:6969/announce',
+  'udp://tracker.ducks.party:1984/announce',
+  'udp://tracker.nyaa.vc:6969/announce',
+  'http://tracker.opentrackr.org:1337/announce',
   'http://tracker.dler.org:6969/announce',
   'http://tracker.renfei.net:8080/announce',
+  'https://tracker.aburaya.live:443/announce',
+  'https://track3r.site:443/announce',
+  'https://t1.hloli.org:443/announce',
 ]
 const UPDATE_REPOSITORY = 'mhdpstudio/GameOnix-App'
 const UPDATE_ASSET_NAME = 'GameOnix-win-unpacked.zip'
@@ -1039,13 +1052,13 @@ async function ensureTorrentClient() {
   // utp-native allocates a 128 KiB buffer per connection. A high peer cap can
   // exhaust memory on Windows and crash Electron's main process (losing the
   // in-memory transfer state). TCP peers, DHT, and trackers remain enabled.
-  torrentClient = new WebTorrent({ maxConns: 48, tracker: { announce }, natUpnp: true, natPmp: true, utp: false, utPex: true, lsd: true })
+  torrentClient = new WebTorrent({ maxConns: 64, tracker: { announce }, natUpnp: true, natPmp: true, utp: false, utPex: true, lsd: true })
   applyTorrentSpeedLimit()
   torrentClient.on('error', (error) => console.error('Torrent client error:', error))
   return torrentClient
 }
 
-function parseTrackerList(value) {
+function parseTrackerList(value, limit = 50) {
   const trackers = String(value || '').split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => /^(udp|https?):\/\//i.test(line))
@@ -1055,7 +1068,11 @@ function parseTrackerList(value) {
         return ['udp:', 'http:', 'https:'].includes(url.protocol) && url.hostname && url.pathname.length < 180
       } catch { return false }
     })
-  return [...new Set(trackers)].slice(0, 20)
+  const unique = [...new Set(trackers)]
+  const udpTrackers = unique.filter((tracker) => tracker.startsWith('udp:'))
+  const webTrackers = unique.filter((tracker) => !tracker.startsWith('udp:'))
+  const udpLimit = Math.ceil(limit * 0.65)
+  return [...udpTrackers.slice(0, udpLimit), ...webTrackers.slice(0, limit - udpLimit), ...udpTrackers.slice(udpLimit)].slice(0, limit)
 }
 
 async function loadSupplementalTrackers() {
@@ -1064,23 +1081,25 @@ async function loadSupplementalTrackers() {
     const cachePath = path.join(app.getPath('userData'), 'public-trackers-cache.json')
     let cachedTrackers = []
     let cachedAt = 0
+    let cacheVersion = 0
     try {
       const cache = JSON.parse(await fs.readFile(cachePath, 'utf8'))
       cachedTrackers = parseTrackerList(Array.isArray(cache.trackers) ? cache.trackers.join('\n') : '')
       cachedAt = Number(cache.savedAt) || 0
+      cacheVersion = Number(cache.formatVersion) || 0
     } catch {}
-    if (cachedTrackers.length && Date.now() - cachedAt < 24 * 60 * 60 * 1000) return cachedTrackers
+    if (cacheVersion >= 2 && cachedTrackers.length && Date.now() - cachedAt < 24 * 60 * 60 * 1000) return cachedTrackers
 
     try {
-      const response = await net.fetch(TRACKER_LIST_URL, { signal: AbortSignal.timeout(3500) })
+      const response = await net.fetch(TRACKER_LIST_URL, { signal: AbortSignal.timeout(8000) })
       if (!response.ok) throw new Error(`Tracker list returned ${response.status}.`)
-      const trackers = parseTrackerList(await response.text())
+      const trackers = parseTrackerList(`${await response.text()}\n${FALLBACK_TRACKERS.join('\n')}`, 50)
       if (!trackers.length) throw new Error('Tracker list was empty.')
-      await fs.writeFile(cachePath, JSON.stringify({ savedAt: Date.now(), trackers }), 'utf8')
+      await fs.writeFile(cachePath, JSON.stringify({ formatVersion: 2, savedAt: Date.now(), trackers }), 'utf8')
       return trackers
     } catch (error) {
       console.warn('Could not refresh public tracker list; using cached/default trackers:', error.message)
-      return cachedTrackers.length ? cachedTrackers : FALLBACK_TRACKERS
+      return parseTrackerList([...cachedTrackers, ...FALLBACK_TRACKERS].join('\n'), 50)
     }
   })().finally(() => { supplementalTrackersPromise = null })
   return supplementalTrackersPromise

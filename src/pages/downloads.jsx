@@ -35,8 +35,13 @@ function statusLabel(status, checkingFiles = false) {
 
 function peerDiscoveryHint(item) {
   if (item.peers > 0) return "";
-  if (item.discoveryWarning) return `Network notice: ${item.discoveryWarning}`;
   const trackerCount = Number(item.trackerCount) || 0;
+  if (item.discoveryWarning) {
+    const nextSources = item.privateTorrent
+      ? `Still checking the ${trackerCount || "listed"} tracker${trackerCount === 1 ? "" : "s"} in this torrent.`
+      : "Still checking other trackers, DHT, and peer exchange.";
+    return `One peer source timed out: ${item.discoveryWarning}. ${nextSources}`;
+  }
   const lastTrackerResponse = item.trackerLastAnnounceAt
     ? `Last tracker response ${new Date(item.trackerLastAnnounceAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}. `
     : "";
