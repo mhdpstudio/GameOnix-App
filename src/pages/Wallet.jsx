@@ -18,7 +18,7 @@ import {
   faFileLines,
 } from "@fortawesome/free-solid-svg-icons";
 import { useAuth } from "../context/AuthContext";
-import { AUTH_API_BASE_URL, WALLET_API_BASE_URL } from "../api/session";
+import { AUTH_API_BASE_URL, WALLET_API_BASE_URL, authFetch } from "../api/session";
 import "./../style/wallet-style.css";
 
 const AUTH_API_URL = `${AUTH_API_BASE_URL}/me`;
@@ -220,7 +220,7 @@ function Wallet() {
   }, []);
 
   const fetchWallet = useCallback(async () => {
-    const tokenResponse = await fetch(`${AUTH_API_URL}?token=true`, {
+    const tokenResponse = await authFetch(`${AUTH_API_URL}?token=true`, {
       method: "GET",
       headers: { Accept: "application/json" },
       credentials: "include",
