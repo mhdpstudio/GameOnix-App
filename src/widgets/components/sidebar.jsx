@@ -28,12 +28,11 @@ import {
 } from "@fortawesome/free-solid-svg-icons";
 
 import { useAuth } from "../../context/AuthContext";
-import { getCommunityApiToken } from "../../api/session";
+import { getCommunityApiToken, WALLET_API_BASE_URL } from "../../api/session";
 
 const DEFAULT_AVATAR =
   "https://raw.githubusercontent.com/mhdpstudio/GameOnix-Data-All/main/0.png";
-const NOTIFICATIONS_URL =
-  "https://gameonixfav.vercel.app/api/auth/wallet-notifications";
+const NOTIFICATIONS_URL = `${WALLET_API_BASE_URL}/wallet-notifications`;
 const NOTIFICATIONS_UPDATED_EVENT = "wallet-notifications-updated";
 
 const navigation = [

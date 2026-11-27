@@ -144,7 +144,7 @@ async function completeDesktopLogin(deepLink) {
     decipher.setAuthTag(payload.subarray(payload.length - 16))
     const token = Buffer.concat([decipher.update(payload.subarray(0, payload.length - 16)), decipher.final()]).toString('utf8')
     if (!token || token.length > 8192) throw new Error('The website returned an invalid account session.')
-    const check = await net.fetch('https://gameonix-backend.vercel.app/api/auth/me', { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } })
+    const check = await net.fetch('https://gameonix-backend-2.vercel.app/api/auth/me', { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } })
     if (!check.ok) throw new Error('The website session expired. Sign in on the website, then try again.')
     const data = await check.json()
     await fs.writeFile(authSessionPath, safeStorage.encryptString(token))

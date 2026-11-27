@@ -1,9 +1,9 @@
 // Helpers for reading game purchase requests out of the wallet ledger.
 // Orders are stored as "purchase_request" transactions whose description is a
 // JSON string with the game, pack and delivery details.
+import { WALLET_API_BASE_URL } from "../api/session";
 
-export const WALLET_API_URL =
-  "https://gameonixfav.vercel.app/api/auth/wallet";
+export const WALLET_API_URL = `${WALLET_API_BASE_URL}/wallet`;
 
 export const PURCHASE_TRANSACTION_TYPE = "purchase_request";
 

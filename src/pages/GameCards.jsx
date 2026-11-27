@@ -24,6 +24,7 @@ import { faPlaystation, faWindows, faXbox } from "@fortawesome/free-brands-svg-i
 import { HomeFeaturedHero } from "./home";
 import EmailSuggestion from "../components/EmailSuggestion";
 import { recordGameActivity } from "../api/follows";
+import { AUTH_API_BASE_URL, WALLET_API_BASE_URL } from "../api/session";
 import { useAuth } from "../context/AuthContext";
 import { useEmailTypoGuard } from "../hooks/useEmailTypoGuard";
 import { isValidEmail } from "../utils/email";
@@ -35,11 +36,9 @@ const DATA_URL =
 const PAYMENTS_URL =
   "https://raw.githubusercontent.com/mhdpstudio/GameOnix-Data-Content/main/payments.json";
 
-const AUTH_API_URL = "https://gameonix-backend.vercel.app/api/auth/me";
-const WALLET_API_URL =
-  "https://gameonixfav.vercel.app/api/auth/wallet";
-const WALLET_PURCHASE_API_URL =
-  "https://gameonixfav.vercel.app/api/auth/wallet-purchase";
+const AUTH_API_URL = `${AUTH_API_BASE_URL}/me`;
+const WALLET_API_URL = `${WALLET_API_BASE_URL}/wallet`;
+const WALLET_PURCHASE_API_URL = `${WALLET_API_BASE_URL}/wallet-purchase`;
 const WALLET_PAYMENT_ID = "__gameonix_wallet__";
 
 const RAW_ASSET_BASE =

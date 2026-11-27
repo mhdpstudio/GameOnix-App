@@ -20,7 +20,7 @@ import {
   faXbox,
 } from "@fortawesome/free-brands-svg-icons";
 
-import { getCommunityApiToken } from "../api/session";
+import { getCommunityApiToken, WALLET_API_BASE_URL } from "../api/session";
 import { useAuth } from "../context/AuthContext";
 import { buildNotificationDetailRows } from "../utils/notificationDetails";
 import {
@@ -30,8 +30,7 @@ import {
 } from "../utils/orders";
 import "./../style/notifications-style.css";
 
-const NOTIFICATIONS_URL =
-  "https://gameonixfav.vercel.app/api/auth/wallet-notifications";
+const NOTIFICATIONS_URL = `${WALLET_API_BASE_URL}/wallet-notifications`;
 const NOTIFICATIONS_UPDATED_EVENT = "wallet-notifications-updated";
 
 function notifyNotificationCountChanged() {

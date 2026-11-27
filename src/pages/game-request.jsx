@@ -18,11 +18,10 @@ import {
 } from "@fortawesome/free-brands-svg-icons";
 
 import { useAuth } from "../context/AuthContext";
-import { getCommunityApiToken } from "../api/session";
+import { getCommunityApiToken, COMMUNITY_API_BASE_URL } from "../api/session";
 import "./../style/game-request-style.css";
 
-const GAME_REQUEST_API_URL =
-  "https://gameonixfav.vercel.app/api/game-request";
+const GAME_REQUEST_API_URL = `${COMMUNITY_API_BASE_URL}/game-request`;
 const PLATFORMS = [
   { label: "PC", icons: [faWindows], description: "Windows, macOS & Linux" },
   {

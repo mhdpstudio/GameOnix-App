@@ -1,11 +1,11 @@
 const API_ORIGINS = {
   auth: [
-    "https://gameonix-backend.vercel.app",
     "https://gameonix-backend-2.vercel.app",
+    "https://gameonix-backend.vercel.app",
   ],
   fav: [
-    "https://gameonixfav.vercel.app",
     "https://gameonix-fav-2.vercel.app",
+    "https://gameonixfav.vercel.app",
   ],
 };
 
@@ -16,54 +16,20 @@ const serviceByHost = new Map(
 );
 
 const originalFetch = window.fetch.bind(window);
-const selectionKeys = {
-  auth: "gameonix_api_origin_auth",
-  fav: "gameonix_api_origin_fav",
-};
-
 function readSelection(service) {
-  try {
-    const saved = localStorage.getItem(selectionKeys[service]);
-    if (API_ORIGINS[service].includes(saved)) return saved;
-  } catch {
-    // Storage can be unavailable in restricted browser contexts.
-  }
-
-  const origins = API_ORIGINS[service];
-  return origins[Math.floor(Math.random() * origins.length)];
-}
-
-function saveSelection(service, origin) {
-  try {
-    localStorage.setItem(selectionKeys[service], origin);
-  } catch {
-    // Keep this request working when storage is unavailable.
-  }
-}
-
-function hasSavedSession() {
-  try {
-    return Boolean(
-      localStorage.getItem("gameonix_session_token") ||
-        sessionStorage.getItem("gameonix_session_token"),
-    );
-  } catch {
-    return false;
-  }
+  return API_ORIGINS[service][0];
 }
 
 export function getBalancedApiOrigin(service) {
   const origins = API_ORIGINS[service];
   if (!origins) throw new Error("Unknown GameOnix API service.");
-  const selected = readSelection(service);
-  saveSelection(service, selected);
-  return selected;
+  return readSelection(service);
 }
 
-function shouldRetry(response, method, service) {
+function shouldRetry(response, method) {
   const safeMethod = ["GET", "HEAD", "OPTIONS"].includes(method);
-  return (safeMethod && response.status === 429) ||
-    (service === "auth" && hasSavedSession() && response.status === 401) ||
+  return response.status === 402 ||
+    (safeMethod && response.status === 429) ||
     (safeMethod && response.status >= 500);
 }
 
@@ -118,8 +84,7 @@ window.fetch = async function gameonixBalancedFetch(input, init) {
     }
   }
 
-  if (firstResponse && !shouldRetry(firstResponse, method, service)) {
-    if (!isAvatarUpload) saveSelection(service, firstOrigin);
+  if (firstResponse && !shouldRetry(firstResponse, method)) {
     return firstResponse;
   }
 
@@ -133,17 +98,5 @@ window.fetch = async function gameonixBalancedFetch(input, init) {
     throw error || firstError;
   }
 
-  if (
-    service === "auth" &&
-    hasSavedSession() &&
-    fallbackResponse.status === 401 &&
-    (firstError || (firstResponse && shouldRetry(firstResponse, method, service)))
-  ) {
-    return firstResponse || Promise.reject(firstError);
-  }
-
-  if (!shouldRetry(fallbackResponse, method, service) && !isAvatarUpload) {
-    saveSelection(service, secondOrigin);
-  }
   return fallbackResponse;
 };

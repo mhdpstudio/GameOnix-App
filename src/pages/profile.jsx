@@ -21,12 +21,12 @@ import {
 import { Link } from "react-router-dom";
 import EmailSuggestion from "../components/EmailSuggestion";
 import { useAuth } from "../context/AuthContext";
-import { authFetch } from "../api/session";
+import { authFetch, AUTH_API_BASE_URL } from "../api/session";
 import { useEmailTypoGuard } from "../hooks/useEmailTypoGuard";
 import { isValidEmail } from "../utils/email";
 import "./../style/profile-style.css";
 
-const API_URL = "https://gameonix-backend.vercel.app/api/auth";
+const API_URL = AUTH_API_BASE_URL;
 
 const DEFAULT_AVATAR =
   "https://raw.githubusercontent.com/mhdpstudio/GameOnix-Data-All/main/0.png";

@@ -5,11 +5,11 @@ import { useDialog } from "../context/DialogContext";
 import { faArrowRight, faCheck, faChevronDown, faCircleQuestion, faGift, faLock, faPaperPlane, faPen, faPlus, faReceipt, faRotateRight, faTicket, faTrashCan, faUserShield, faWallet } from "@fortawesome/free-solid-svg-icons";
 import { faWhatsapp } from "@fortawesome/free-brands-svg-icons";
 import { useAuth } from "../context/AuthContext";
-import { getCommunityApiToken } from "../api/session";
+import { getCommunityApiToken, COMMUNITY_API_BASE_URL, WALLET_API_BASE_URL } from "../api/session";
 import "./../style/support-style.css";
 
-const SUPPORT_API_URL = "https://gameonixfav.vercel.app/api/support-request";
-const TICKETS_API_URL = "https://gameonixfav.vercel.app/api/auth/wallet-notifications";
+const SUPPORT_API_URL = `${COMMUNITY_API_BASE_URL}/support-request`;
+const TICKETS_API_URL = `${WALLET_API_BASE_URL}/wallet-notifications`;
 const NOTIFICATIONS_UPDATED_EVENT = "wallet-notifications-updated";
 const WHATSAPP_URL = "https://wa.link/2od11q";
 const MAX_MESSAGE_LENGTH = 1500;

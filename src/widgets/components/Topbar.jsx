@@ -31,14 +31,13 @@ import {
     faWindows,
     faXbox,
 } from "@fortawesome/free-brands-svg-icons";
-import { getCommunityApiToken } from "../../api/session";
+import { getCommunityApiToken, WALLET_API_BASE_URL } from "../../api/session";
 import { getGameCategories } from "../../utils/game-categories";
 
 import "./../../style/topbar.css";
 
-const WALLET_NOTIFICATIONS_URL =
-    "https://gameonixfav.vercel.app/api/auth/wallet-notifications";
-const WALLET_API_URL = "https://gameonixfav.vercel.app/api/auth/wallet";
+const WALLET_NOTIFICATIONS_URL = `${WALLET_API_BASE_URL}/wallet-notifications`;
+const WALLET_API_URL = `${WALLET_API_BASE_URL}/wallet`;
 const PAYMENTS_URL =
     "https://raw.githubusercontent.com/mhdpstudio/GameOnix-Data-Content/main/payments.json";
 const NOTIFICATIONS_UPDATED_EVENT = "wallet-notifications-updated";

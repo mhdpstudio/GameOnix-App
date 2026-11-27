@@ -1,6 +1,6 @@
-import { authFetch } from "./session";
+import { AUTH_API_BASE_URL, authFetch } from "./session";
 
-const API_URL = "https://gameonix-backend.vercel.app/api/auth/favorites";
+const API_URL = `${AUTH_API_BASE_URL}/favorites`;
 
 async function request(method, body) {
   const response = await authFetch(API_URL, {

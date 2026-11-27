@@ -19,11 +19,11 @@ import {
 import Loader from "../widgets/components/Loader";
 import EmailSuggestion from "../components/EmailSuggestion";
 import { useAuth } from "../context/AuthContext";
+import { AUTH_API_BASE_URL } from "../api/session";
 import { useEmailTypoGuard } from "../hooks/useEmailTypoGuard";
 import { isValidEmail } from "../utils/email";
 import "./../style/login-style.css";
 
-const API_URL = "https://gameonix-backend.vercel.app/api/auth";
 const AUTH_CLIENT_ID_KEY = "gameonix_auth_client_id";
 
 function getAuthClientId() {
@@ -212,7 +212,7 @@ function Login() {
       const clientId = getAuthClientId();
       if (clientId) headers["X-GameOnix-Client-ID"] = clientId;
     }
-    const response = await fetch(`${API_URL}/${endpoint}`, {
+    const response = await fetch(`${AUTH_API_BASE_URL}/${endpoint}`, {
       method: "POST",
       headers,
       credentials: "include",

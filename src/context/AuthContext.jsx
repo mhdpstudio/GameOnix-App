@@ -7,12 +7,11 @@ import {
 } from "react";
 
 import {
+  AUTH_API_BASE_URL,
   authFetch,
   clearSessionToken,
   storeSessionToken,
 } from "../api/session";
-
-const API_URL = "https://gameonix-backend.vercel.app/api/auth";
 
 const AuthContext = createContext(null);
 
@@ -22,7 +21,7 @@ async function reportDesktopAppVersion() {
   try {
     const { version } = await desktop.settings.get();
     if (!version) return;
-    const response = await authFetch(`${API_URL}/me`, {
+    const response = await authFetch(`${AUTH_API_BASE_URL}/me`, {
       method: "POST",
       headers: {
         Accept: "application/json",
@@ -48,7 +47,7 @@ export function AuthProvider({ children }) {
     setAuthLoading(true);
 
     try {
-      const response = await authFetch(`${API_URL}/me`, {
+      const response = await authFetch(`${AUTH_API_BASE_URL}/me`, {
         method: "GET",
         headers: {
           Accept: "application/json",
@@ -104,7 +103,7 @@ export function AuthProvider({ children }) {
   // Sign out from the backend and clear the local session.
   const logout = useCallback(async () => {
     try {
-      const response = await authFetch(`${API_URL}/logout`, {
+      const response = await authFetch(`${AUTH_API_BASE_URL}/logout`, {
         method: "POST",
         headers: {
           Accept: "application/json",

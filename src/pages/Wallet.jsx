@@ -18,11 +18,11 @@ import {
   faFileLines,
 } from "@fortawesome/free-solid-svg-icons";
 import { useAuth } from "../context/AuthContext";
+import { AUTH_API_BASE_URL, WALLET_API_BASE_URL } from "../api/session";
 import "./../style/wallet-style.css";
 
-const AUTH_API_URL = "https://gameonix-backend.vercel.app/api/auth/me";
-const WALLET_API_URL =
-  "https://gameonixfav.vercel.app/api/auth/wallet";
+const AUTH_API_URL = `${AUTH_API_BASE_URL}/me`;
+const WALLET_API_URL = `${WALLET_API_BASE_URL}/wallet`;
 const PAYMENTS_URL =
   "https://raw.githubusercontent.com/mhdpstudio/GameOnix-Data-Content/main/payments.json";
 
