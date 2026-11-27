@@ -28,7 +28,7 @@ import { DialogProvider } from "./context/DialogContext";
 import { AUTH_API_BASE_URL } from "./api/session";
 import "./style/site-control.css";
 
-const SITE_STATUS_URL = `${AUTH_API_BASE_URL}/me?siteStatus=1`;
+const SITE_STATUS_URL = `${AUTH_API_BASE_URL}/me?siteStatus=1&cors=1`;
 
 const SITE_MODE_CONTENT = {
   maintenance: {
