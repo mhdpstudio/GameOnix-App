@@ -29,6 +29,7 @@ import { AUTH_API_BASE_URL } from "./api/session";
 import "./style/site-control.css";
 
 const SITE_STATUS_URL = `${AUTH_API_BASE_URL}/me?siteStatus=1&cors=1`;
+const FORCE_SITE_CLOSED = true;
 
 const SITE_MODE_CONTENT = {
   maintenance: {
@@ -49,9 +50,14 @@ const SITE_MODE_CONTENT = {
 };
 
 function SiteStatusGate({ children }) {
-  const [siteControl, setSiteControl] = useState(null);
+  const [siteControl, setSiteControl] = useState(
+    FORCE_SITE_CLOSED
+      ? { mode: "emergency", message: "GameOnix is temporarily closed. Please check back later." }
+      : null,
+  );
 
   useEffect(() => {
+    if (FORCE_SITE_CLOSED) return undefined;
     let active = true;
     const startupFallback = window.setTimeout(() => {
       if (active) setSiteControl((current) => current || { mode: "online" });
